@@ -1,0 +1,21 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.tmp
+
+# Model weights and bundles (avoid repo bloat & HTTP 408 upload timeouts)
+checkpoints/
+*.pt
+*.zip
+
+# Environment / IDE
+.venv/
+env/
+venv/
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

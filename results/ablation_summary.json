@@ -1,0 +1,131 @@
+{
+  "dataset": "takatak",
+  "variants": {
+    "A_baseline": {
+      "description": "LightGCN baseline (User-Video only, no vloggers, no CL, no denoise)",
+      "overrides": {
+        "CL_REG": 0.0,
+        "DENOISE_REG": 0.0,
+        "VLOGGER_REG": 0.0,
+        "LAMBDA_VLOGGER": 1.0
+      },
+      "best_val_epoch": 5,
+      "val_recall@10": 0.0517,
+      "test": {
+        "Recall@10": 0.0484,
+        "Recall@20": 0.0836,
+        "NDCG@10": 0.0222,
+        "NDCG@20": 0.031,
+        "MRR@10": 0.0144,
+        "MRR@20": 0.0168,
+        "Precision@10": 0.0048,
+        "Precision@20": 0.0042
+      }
+    },
+    "B_vlogger": {
+      "description": "Baseline + Tripartite Vlogger Dual-View (lambda=0.5, L_vlog=0.1)",
+      "overrides": {
+        "CL_REG": 0.0,
+        "DENOISE_REG": 0.0,
+        "VLOGGER_REG": 0.1,
+        "LAMBDA_VLOGGER": 0.5
+      },
+      "best_val_epoch": 12,
+      "val_recall@10": 0.0541,
+      "test": {
+        "Recall@10": 0.0471,
+        "Recall@20": 0.0828,
+        "NDCG@10": 0.0231,
+        "NDCG@20": 0.032,
+        "MRR@10": 0.0159,
+        "MRR@20": 0.0183,
+        "Precision@10": 0.0047,
+        "Precision@20": 0.0041
+      }
+    },
+    "C_contrastive": {
+      "description": "Baseline + Vlogger + InfoNCE Contrastive Learning (beta=0.1)",
+      "overrides": {
+        "CL_REG": 0.1,
+        "DENOISE_REG": 0.0,
+        "VLOGGER_REG": 0.1,
+        "LAMBDA_VLOGGER": 0.5
+      },
+      "best_val_epoch": 2,
+      "val_recall@10": 0.0533,
+      "test": {
+        "Recall@10": 0.0468,
+        "Recall@20": 0.0825,
+        "NDCG@10": 0.0218,
+        "NDCG@20": 0.0307,
+        "MRR@10": 0.0143,
+        "MRR@20": 0.0167,
+        "Precision@10": 0.0047,
+        "Precision@20": 0.0041
+      }
+    },
+    "D_denoising": {
+      "description": "Baseline + CONDE Graph Denoising (gamma=0.05, single view)",
+      "overrides": {
+        "CL_REG": 0.0,
+        "DENOISE_REG": 0.05,
+        "VLOGGER_REG": 0.0,
+        "LAMBDA_VLOGGER": 1.0
+      },
+      "best_val_epoch": 5,
+      "val_recall@10": 0.0517,
+      "test": {
+        "Recall@10": 0.0484,
+        "Recall@20": 0.0837,
+        "NDCG@10": 0.0222,
+        "NDCG@20": 0.031,
+        "MRR@10": 0.0144,
+        "MRR@20": 0.0168,
+        "Precision@10": 0.0048,
+        "Precision@20": 0.0042
+      }
+    },
+    "E_vlogger_denoise": {
+      "description": "Vlogger Dual-View + CONDE Graph Denoising (no CL)",
+      "overrides": {
+        "CL_REG": 0.0,
+        "DENOISE_REG": 0.05,
+        "VLOGGER_REG": 0.1,
+        "LAMBDA_VLOGGER": 0.5
+      },
+      "best_val_epoch": 11,
+      "val_recall@10": 0.0541,
+      "test": {
+        "Recall@10": 0.0475,
+        "Recall@20": 0.0843,
+        "NDCG@10": 0.0231,
+        "NDCG@20": 0.0323,
+        "MRR@10": 0.0158,
+        "MRR@20": 0.0183,
+        "Precision@10": 0.0047,
+        "Precision@20": 0.0042
+      }
+    },
+    "F_full": {
+      "description": "Full Vynora 2.0 (Dual-View + CL + CONDE Denoising)",
+      "overrides": {
+        "CL_REG": 0.1,
+        "DENOISE_REG": 0.05,
+        "VLOGGER_REG": 0.1,
+        "LAMBDA_VLOGGER": 0.5
+      },
+      "best_val_epoch": 2,
+      "val_recall@10": 0.0533,
+      "test": {
+        "Recall@10": 0.0468,
+        "Recall@20": 0.0825,
+        "NDCG@10": 0.0218,
+        "NDCG@20": 0.0307,
+        "MRR@10": 0.0143,
+        "MRR@20": 0.0167,
+        "Precision@10": 0.0047,
+        "Precision@20": 0.0041
+      }
+    }
+  }
+}
