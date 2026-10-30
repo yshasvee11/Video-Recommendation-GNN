@@ -1,5 +1,5 @@
 # =============================================================================
-# Gitignore for Video-Recommendation-GNN (Vynora 2.0)
+# Gitignore for Video-Recommendation-GNN
 # =============================================================================
 
 # Byte-compiled / Python cache files
@@ -9,7 +9,14 @@ __pycache__/
 *.tmp
 *.bak
 
-# Google Colab & Jupyter Notebook artifacts
+# Model checkpoints & large binary weights (avoid bloat & upload timeouts)
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.ckpt
+
+# Google Colab temporary archives & runtime caches
 .ipynb_checkpoints/
 */.ipynb_checkpoints/*
 *.ipynb_checkpoints
@@ -21,21 +28,10 @@ vynora2_trained_results.zip
 *.tar.gz
 *.rar
 *.7z
-
-# Model weights, embeddings, and checkpoints (avoid upload timeouts & repo bloat)
-checkpoints/
-*.pt
-*.pth
-*.bin
-*.ckpt
 *.npy
 *.npz
 *.pkl
 *.pickle
-
-# Datasets and raw interaction files (use external download or Colab setup)
-data/
-VAgnn-dataset/
 
 # Logs and runtime outputs
 *.log

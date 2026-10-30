@@ -1,20 +1,34 @@
 # Vynora 2.0 — Denoising & Vlogger-Aware Meta-Path Graph CL with Diversity Recommendation
 
-A research implementation for micro-video recommendation that synthesizes four foundational papers:
+A research implementation for micro-video recommendation that synthesizes five foundational papers:
 
-| Paper | What we take |
-|---|---|
-| **VA-GNN** (Paper 4) | Tripartite graph (User, Video, Vlogger), dual-view propagation, lambda-weighted scoring |
-| **MPGCL** (Paper 3) | Meta-path views, cross-view InfoNCE contrastive loss, ProjectionHead |
-| **CONDE** (Paper 2) | Edge reliability scoring, EMA score accumulation, periodic graph denoising |
-| **Paper 5** (Chun et al., ESWA 2024) | Diversification score prediction (GNN with feature-augmented attention), publisher & content diversity metrics (Eq 1 & 2), and diversity re-ranking (MMR & Score Blending) |
+| Paper | Reference | What we take |
+|---|---|---|
+| **VA-GNN** | [Paper 4](research-papers/Paper_4_VA-GNN.pdf) | Tripartite graph (User, Video, Vlogger), dual-view propagation, lambda-weighted scoring |
+| **MPGCL** | [Paper 3](research-papers/Paper_3-MPGCL.pdf) | Meta-path views, cross-view InfoNCE contrastive loss, ProjectionHead |
+| **CONDE** | [Paper 2](research-papers/Paper_2-CONDE.pdf) | Edge reliability scoring, EMA score accumulation, periodic graph denoising |
+| **Paper 5** | [Paper 5 (Chun et al., ESWA 2024)](research-papers/Paper_5.pdf) | Diversification score prediction (GNN with feature-augmented attention), publisher & content diversity metrics (Eq 1 & 2), and diversity re-ranking (MMR & Score Blending) |
+| **Sagittarius** | [Paper 1](research-papers/Paper%201-Sagittarius.pdf) | Multi-behavior interaction modeling & interest graph foundation |
 
 ---
 
 ## Project Structure
 
 ```
-vynora2/
+Video-Recommendation-GNN/
+├── data/                              ← Bundled benchmark datasets (takatak & wechat)
+│   ├── takatak/                       ← 14,571 users, 13,133 videos, 912 vloggers
+│   └── wechat/                        ← 19,737 users, 25,976 videos, 2,088 vloggers
+├── research-papers/                   ← The 5 foundational reference papers (PDFs)
+│   ├── Paper 1-Sagittarius.pdf
+│   ├── Paper_2-CONDE.pdf
+│   ├── Paper_3-MPGCL.pdf
+│   ├── Paper_4_VA-GNN.pdf
+│   └── Paper_5.pdf
+├── results/                           ← Benchmark logs, ablation and training results
+│   ├── results_takatak.json           ← Full Takatak training & validation logs
+│   ├── results_wechat.json            ← Full WeChat training & validation logs
+│   └── ablation_summary.json          ← 6-variant ablation experimental summary
 ├── config.py                          ← Hyperparameters, paths & diversity settings
 ├── dataloader.py                      ← VynoraDataset: loads takatak/wechat, builds sparse graphs
 ├── model.py                           ← VynoraGNN: dual-view GNN + contrastive + edge scorer
@@ -27,8 +41,9 @@ vynora2/
 ├── train.py                           ← Full training loop (run this)
 ├── predict.py                         ← Home screen inference with Paper 5 diversity controls
 ├── ablation.py                        ← Six-variant ablation study (A–F)
-├── checkpoints/                       ← Saved model weights
-└── results/                           ← JSON benchmark results and ablation summaries
+├── generate_colab_nb.py               ← Colab notebook builder
+├── vynora2_colab.ipynb                ← Turnkey Google Colab T4 GPU execution notebook
+└── requirements.txt                   ← Dependencies specification
 ```
 
 ---
