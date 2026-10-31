@@ -112,8 +112,8 @@ def build_wechat_max_notebook():
                 "    LR = 0.001\n",
                 "    \n",
                 "    # Full-capacity training schedule\n",
-                "    EPOCHS = 60                   # Ample training budget to reach full convergence\n",
-                "    PATIENCE = 12                 # Early stopping patience\n",
+                "    EPOCHS = 150                  # 150 epochs budget matching research paper standards\n",
+                "    PATIENCE = 35                 # Early stopping patience (35 epochs without validation gain)\n",
                 "    BPR_BATCH = 4096              # Fully saturates T4 GPU parallel CUDA cores\n",
                 "    NEG_K = 1\n",
                 "    \n",
@@ -567,6 +567,7 @@ def build_wechat_max_notebook():
                 "batch_size = cfg.BPR_BATCH\n",
                 "\n",
                 "CKPT_FILE = 'best_wechat_vynora_max.pt'\n",
+                "LAST_CKPT_FILE = 'last_wechat_vynora_model.pt'\n",
                 "\n",
                 "print(f'Starting Vynora Maximum Training on WeChat ({cfg.EPOCHS} full epochs)...')\n",
                 "print(f'Epochs: {cfg.EPOCHS} | Batch Size: {batch_size} | Early Stopping Patience: {cfg.PATIENCE}\\n')\n",
@@ -661,11 +662,15 @@ def build_wechat_max_notebook():
                 "        'val_Recall@20': r20, 'val_NDCG@20': n20\n",
                 "    })\n",
                 "\n",
+                "# Save the final model state after the last epoch\n",
+                "torch.save(model.state_dict(), LAST_CKPT_FILE)\n",
+                "\n",
                 "print(f'\\n{\"=\"*75}')\n",
                 "print(f'✓ Full Training Complete!')\n",
                 "print(f'  Best Epoch     : {best_epoch}')\n",
                 "print(f'  Best Val Rec@10: {best_recall:.4f}')\n",
-                "print(f'  Saved Weights  : {CKPT_FILE}')\n",
+                "print(f'  Saved Best Weights (Epoch {best_epoch}): {CKPT_FILE}')\n",
+                "print(f'  Saved Last Weights (Epoch {ep}): {LAST_CKPT_FILE}')\n",
                 "print(f'{\"=\"*75}')"
             ]
         },
@@ -884,10 +889,11 @@ def build_wechat_max_notebook():
                 "\n",
                 "try:\n",
                 "    files.download(CKPT_FILE)\n",
+                "    files.download(LAST_CKPT_FILE)\n",
                 "    files.download('results_wechat_max.json')\n",
-                "    print('✓ Checkpoint download initiated in browser!')\n",
+                "    print('✓ Checkpoints and benchmark JSON download initiated in browser!')\n",
                 "except Exception as e:\n",
-                "    print(f'Download notice: {e}. You can also download {CKPT_FILE} from the left file pane.')"
+                "    print(f'Download notice: {e}. You can also download {CKPT_FILE} and {LAST_CKPT_FILE} from the left file pane.')"
             ]
         }
     ]
@@ -921,3 +927,4 @@ if __name__ == "__main__":
     with open(p2, "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=2)
     print(f"[Done] Generated notebook at: {p2}")
+
