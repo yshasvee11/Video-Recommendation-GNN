@@ -1,7 +1,4 @@
-"""
-config.py  –  Vynora 2.0: Denoising & Vlogger-Aware Meta-Path Graph CL
-Central configuration: all hyper-parameters and path settings live here.
-"""
+"""Shared paths and hyperparameters for Vynora."""
 
 import os
 import torch
@@ -10,38 +7,11 @@ import torch
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def _get_data_root():
-    # 1. Environment variable override
+    """Use an explicit data directory when supplied, otherwise bundled data."""
     env_dir = os.environ.get("VYNORA_DATA_DIR")
     if env_dir and os.path.exists(env_dir):
         return env_dir
-    # 2. Local repository data directory
-    p_data = os.path.abspath(os.path.join(BASE_DIR, "data"))
-    if os.path.exists(p_data):
-        return p_data
-    p_local_vagnn = os.path.abspath(os.path.join(BASE_DIR, "VAgnn-dataset"))
-    if os.path.exists(p_local_vagnn):
-        return p_local_vagnn
-    # 3. Local repo structure (relative to workspace)
-    p_vagnn = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "VAGNN", "data"))
-    if os.path.exists(p_vagnn):
-        return p_vagnn
-    p_other = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "other-dataset's"))
-    if os.path.exists(p_other):
-        return p_other
-    p1 = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "VAgnn-dataset"))
-    if os.path.exists(p1):
-        return p1
-    # 4. Colab direct paths: /content/VAgnn-dataset or ./VAgnn-dataset
-    p2 = "/content/VAgnn-dataset"
-    if os.path.exists(p2):
-        return p2
-    p3 = os.path.abspath(os.path.join(BASE_DIR, "VAgnn-dataset"))
-    if os.path.exists(p3):
-        return p3
-    p4 = os.path.abspath(os.path.join(BASE_DIR, "..", "VAgnn-dataset"))
-    if os.path.exists(p4):
-        return p4
-    return p_vagnn
+    return os.path.join(BASE_DIR, "data")
 
 DATA_ROOT  = _get_data_root()
 CKPT_DIR   = os.path.join(BASE_DIR, "checkpoints")

@@ -23,38 +23,24 @@ What IS correctly implemented:
      NOTE: MMR is described in Paper 5's related work (Sec 2.1) as a baseline.
      It is NOT Paper 5's primary method (predicted-score blending).
 
-What is implemented but NOT YET USED at inference (EXPERIMENTAL):
-  5. DiversificationGNN class -- implements Paper 5 Sec 4.5 architecture
-     (feature-augmented attention, node/edge propagation, MAE predictor MLP).
-     STATUS: Trained by train_diversification_predictor.py (Val MAE ~0.44 on
-     publisher targets -- WEAK; a constant-mean predictor achieves ~0.032 MAE
-     since targets cluster tightly near 0.97). The saved checkpoint is NOT
-     loaded during inference in diverse_rerank(). The 'score_rerank' method
-     recomputes empirical labels at runtime -- it is an empirical re-ranking
-     baseline, NOT Paper 5's predicted-score re-ranking.
-
 What is NOT implemented:
   - Genre diversity (no genre metadata in dataset)
-  - Separate predictors per diversity type (Paper 5: genre, publisher, content)
-  - Loading trained GNN checkpoint for actual predicted-score re-ranking
+  - Paper 5's learned diversification-score predictor
   - Random-walk based recommendation-edge graph (dataset has no recommendation edges)
 
 Implements:
   1. Diversity Metrics: Publisher Diversity, Content Diversity, Entropy
   2. Empirical Diversification Score Calculation (empirical baseline, not Paper 5 GNN)
-  3. DiversificationGNN class [EXPERIMENTAL - not used at inference]
-  4. Diversity-Aware Re-Ranking:
+  3. Diversity-Aware Re-Ranking:
      - Method A: Empirical Score Blending (score_rerank) -- empirical labels, not GNN
      - Method B: Maximal Marginal Relevance (mmr) -- valid diversification baseline
-  5. Batched Diversity Evaluation across user populations
+  4. Batched Diversity Evaluation across user populations
 """
 
 import os
 import math
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import config
 
 
@@ -241,126 +227,7 @@ def compute_empirical_diversification_scores(dataset,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Diversification Score Prediction GNN (Paper 5 Section 4.5, Eq 3-8)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class FeatureAugmentedAttentionLayer(nn.Module):
-    """
-    Embedding Propagation Layer with Feature-Augmented Attention mechanism
-    (Paper 5 Section 4.5.2, Equations 4, 5, 6).
-
-    alpha_{j, i, e} = softmax_j( LeakyReLU( a^T [W_N h_j || W_N h_i || W_E h_e] ) )
-    h_j^{(l+1)}     = ELU( sum_{i in N(j)} alpha_{j, i, e} W_N h_i )
-    h_e^{(l+1)}     = W_E h_e^{(l)}
-    """
-    def __init__(self, node_dim: int, edge_dim: int = 4, out_dim: int = 64):
-        super().__init__()
-        self.w_node = nn.Linear(node_dim, out_dim, bias=False)
-        self.w_edge = nn.Linear(edge_dim, out_dim, bias=False)
-        # Attention vector: takes concatenation of [W_N h_j || W_N h_i || W_E h_e] -> 3 * out_dim
-        self.att_vec = nn.Parameter(torch.empty(3 * out_dim, 1))
-        nn.init.xavier_uniform_(self.att_vec.data, gain=1.414)
-        self.leaky_relu = nn.LeakyReLU(0.2)
-        self.activation = nn.ELU()
-
-    def forward(self, h_nodes: torch.Tensor, edge_index: torch.Tensor, edge_attr: torch.Tensor):
-        """
-        Args:
-            h_nodes: [num_nodes, node_dim]
-            edge_index: [2, num_edges] (src, dst)
-            edge_attr: [num_edges, edge_dim]
-        """
-        src, dst = edge_index[0], edge_index[1]
-
-        # Shared linear transformations
-        wn_nodes = self.w_node(h_nodes)      # [num_nodes, out_dim]
-        we_edges = self.w_edge(edge_attr)    # [num_edges, out_dim]
-
-        wn_src = wn_nodes[src]                # [num_edges, out_dim]
-        wn_dst = wn_nodes[dst]                # [num_edges, out_dim]
-
-        # Feature concatenation: [W_N h_dst || W_N h_src || W_E h_e]
-        cat_feat = torch.cat([wn_dst, wn_src, we_edges], dim=-1) # [num_edges, 3 * out_dim]
-        att_logits = self.leaky_relu(torch.matmul(cat_feat, self.att_vec).squeeze(-1)) # [num_edges]
-
-        # Normalized attention per destination node (approx via softmax over incoming edges)
-        # Numerical stability via exp
-        att_exp = torch.exp(att_logits - att_logits.max())
-        dst_sum = torch.zeros(h_nodes.size(0), device=h_nodes.device)
-        dst_sum.scatter_add_(0, dst, att_exp)
-        att_weights = att_exp / (dst_sum[dst] + 1e-8) # [num_edges]
-
-        # Aggregate weighted messages
-        messages = wn_src * att_weights.unsqueeze(-1) # [num_edges, out_dim]
-        out_nodes = torch.zeros_like(wn_nodes)
-        out_nodes.scatter_add_(0, dst.unsqueeze(-1).expand_as(messages), messages)
-        out_nodes = self.activation(out_nodes)
-
-        # Update edge representation (Eq 6)
-        out_edges = we_edges
-
-        return out_nodes, out_edges
-
-
-class DiversificationGNN(nn.Module):
-    """
-    [EXPERIMENTAL — NOT CURRENTLY USED AT INFERENCE]
-
-    Paper 5 Section 4.5 Diversification Score Prediction Model.
-
-    This class implements the Paper 5 GNN architecture. It is trained by
-    train_diversification_predictor.py. However, the saved checkpoint is NOT
-    currently loaded during diverse_rerank(). The 'score_rerank' method
-    recomputes empirical diversification labels at inference time — it does NOT
-    call this model.
-
-    Known issues with the current training setup:
-    - Val MAE ~0.44 on publisher targets (WEAK: constant-mean achieves ~0.032 MAE
-      because publisher diversification targets cluster tightly near 0.97).
-    - The co-occurrence graph used for training is derived from interaction-list order,
-      NOT from an observed recommendation-edge graph (which Paper 5 requires).
-    - Only publisher and content predictors are possible; genre is unavailable.
-
-    Architecture (Paper 5 Sec 4.5):
-      1. Node feature embedding: h_0 = W_embed * r_i  (Eq 3)
-      2. Embedding propagation layers with feature-augmented attention  (Eq 4-6)
-      3. Prediction MLP: S_hat = W_2(sigma(W_1 h_i))  (Eq 7)
-      4. Loss: MAE  (Eq 8)
-
-    Future work: Fix graph construction, retrain with proper session data,
-    load checkpoint in score_rerank for actual predicted-score re-ranking.
-    """
-    def __init__(self, in_features_dim: int, hidden_dim: int = 64, edge_dim: int = 4, n_layers: int = 2):
-        super().__init__()
-        self.node_embed = nn.Linear(in_features_dim, hidden_dim)
-        self.layers = nn.ModuleList([
-            FeatureAugmentedAttentionLayer(hidden_dim, edge_dim=edge_dim if i == 0 else hidden_dim, out_dim=hidden_dim)
-            for i in range(n_layers)
-        ])
-        # Prediction Layer (Eq 7)
-        self.predictor = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1),
-            nn.Sigmoid() # scores are in [0, 1]
-        )
-
-    def forward(self, node_feats, edge_index, edge_attr):
-        h = self.node_embed(node_feats)
-        e = edge_attr
-        for layer in self.layers:
-            h_next, e = layer(h, edge_index, e)
-            h = h + h_next  # residual connection for stability
-        scores = self.predictor(h).squeeze(-1)
-        return scores
-
-    def compute_loss(self, pred_scores, true_scores):
-        """Paper 5 Equation (8): Mean Absolute Error (MAE)"""
-        return F.l1_loss(pred_scores, true_scores)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 4. Diversity-Aware Re-Ranking (Paper 5 Section 7 & Section 2.1)
+# 3. Diversity-Aware Re-Ranking (Paper 5 Section 7 & Section 2.1)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def diverse_rerank(candidate_ids,
@@ -384,9 +251,7 @@ def diverse_rerank(candidate_ids,
       S_final(v) = (1-lambda) * S_rel(v) + lambda * S_div(v)
       where S_div(v) is the EMPIRICAL diversification score (average publisher/content
       diversity across users who watched v in training data).
-      NOTE: This does NOT use the trained DiversificationGNN. It is an empirical
-      upper-bound baseline — it uses observed training signal, not predictions.
-      Paper 5's true method would use GNN-predicted scores at inference time.
+      This uses observed training signal, not a learned predictor.
 
     Args:
         candidate_ids: array-like of candidate video IDs (from top-100 pool)

@@ -1,0 +1,56 @@
+{
+  "dataset": "wechat",
+  "model": "Vynora Full-Epoch Max Performance",
+  "best_epoch": 1,
+  "best_val_recall10": 0.0034,
+  "test_results": {
+    "recall10": 0.0036,
+    "ndcg10": 0.0023,
+    "recall20": 0.0051,
+    "ndcg20": 0.0027,
+    "precision10": 0.0004,
+    "mrr10": 0.0019,
+    "pub_diversity10": 0.0061
+  },
+  "fair_reranking_comparison": [
+    {
+      "method": "Pure Relevance (Base)",
+      "rec10": 0.0034,
+      "ndcg10": 0.0023,
+      "pub_div10": 0.0061,
+      "cov10": 0.0131
+    },
+    {
+      "method": "Hard Creator Cap (Max 2)",
+      "rec10": 0.0073,
+      "ndcg10": 0.0038,
+      "pub_div10": 0.9052,
+      "cov10": 0.0109
+    },
+    {
+      "method": "MMR Publisher (lambda=0.3)",
+      "rec10": 0.0045,
+      "ndcg10": 0.0029,
+      "pub_div10": 0.1587,
+      "cov10": 0.0124
+    },
+    {
+      "method": "MMR Publisher (lambda=0.5)",
+      "rec10": 0.0064,
+      "ndcg10": 0.0037,
+      "pub_div10": 0.5819,
+      "cov10": 0.0128
+    },
+    {
+      "method": "MMR Publisher (lambda=0.7)",
+      "rec10": 0.0064,
+      "ndcg10": 0.0037,
+      "pub_div10": 0.5819,
+      "cov10": 0.0128
+    }
+  ],
+  "checkpoint_files": {
+    "best_checkpoint": "best_wechat_vynora_max.pt",
+    "last_checkpoint": "last_wechat_vynora_model.pt"
+  }
+}
