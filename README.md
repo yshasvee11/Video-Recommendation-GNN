@@ -61,9 +61,21 @@ Video-Recommendation-GNN/
 ├── predict.py                         ← Single-user inference with optional MMR diversity
 ├── ablation.py                        ← Six-variant ablation of the Vynora recommender
 ├── generate_colab_nb.py               ← Colab notebook builder
-├── vynora2_colab.ipynb                ← Google Colab T4 GPU execution notebook
+├── vynora2_colab.ipynb                ← Interactive Google Colab T4 GPU execution notebook
+├── vynora_single_file_train.ipynb     ← Standalone all-in-one Colab training & diversity notebook
 └── requirements.txt                   ← Dependencies specification
 ```
+
+---
+
+## Google Colab Execution
+
+You can train the model, evaluate recommendations, and benchmark the accuracy-diversity trade-off on a free **Google Colab T4 GPU** with 1 click:
+
+| Notebook | Description | Open in Colab |
+|---|---|---|
+| **Interactive Workflow** (`vynora2_colab.ipynb`) | Form sliders for hyperparameters, live loss/recall plots, Pareto trade-off curves, and creator distribution charts | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yshasvee11/Video-Recommendation-GNN/blob/main/vynora2_colab.ipynb) |
+| **Standalone All-in-One** (`vynora_single_file_train.ipynb`) | 100% self-contained single `.ipynb` file with model, dataset, MMR diversification, training loop, and metrics embedded directly in cells | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yshasvee11/Video-Recommendation-GNN/blob/main/vynora_single_file_train.ipynb) |
 
 ---
 
