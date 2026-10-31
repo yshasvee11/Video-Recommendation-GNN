@@ -69,8 +69,10 @@ Video-Recommendation-GNN/
 ├── predict.py                         ← Single-user inference with adaptive gating & MMR
 ├── ablation.py                        ← 8-variant research ablation matrix (M1–M8)
 ├── generate_colab_nb.py               ← Colab notebook builder
+├── generate_wechat_max_nb.py          ← WeChat Max-Performance notebook builder
 ├── vynora2_colab.ipynb                ← Interactive Google Colab T4 GPU execution notebook
 ├── vynora_single_file_train.ipynb     ← Standalone all-in-one Colab training & diversity notebook
+├── vynora_wechat_max_performance.ipynb← WeChat full-dataset maximum performance notebook
 └── requirements.txt                   ← Dependencies specification
 ```
 
@@ -84,6 +86,7 @@ You can train the model, evaluate recommendations, and benchmark the accuracy-di
 |---|---|---|
 | **Interactive Workflow** (`vynora2_colab.ipynb`) | Form sliders for hyperparameters, live loss/recall plots, Pareto trade-off curves, fair re-ranking comparison, and creator distribution charts | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yshasvee11/Video-Recommendation-GNN/blob/main/vynora2_colab.ipynb) |
 | **Standalone All-in-One** (`vynora_single_file_train.ipynb`) | 100% self-contained single `.ipynb` file with model, dataset, Sagittarius weighting, bilinear gate, MMR diversification, training loop, and metrics embedded directly in cells | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yshasvee11/Video-Recommendation-GNN/blob/main/vynora_single_file_train.ipynb) |
+| **WeChat Maximum Performance** (`vynora_wechat_max_performance.ipynb`) | Dedicated full-capacity training on WeChat: 100% dataset sampling per epoch, 3 GNN layers, 60 epochs, best `.pt` checkpoint & JSON browser download | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yshasvee11/Video-Recommendation-GNN/blob/main/vynora_wechat_max_performance.ipynb) |
 
 ---
 
