@@ -143,9 +143,18 @@ python diversity_benchmark.py --dataset takatak --mode val --compare
 | **5. Hybrid MMR** ($\lambda=0.3$) | 0.0150 (-2.6%) | 0.0076 (-6.2%) | 0.0622 | 0.1168 | 0.0251 |
 | **6. Score Blending** ($\lambda=0.3$) | 0.0148 (-3.9%) | 0.0074 (-8.6%) | 0.0229 | 0.0931 | **0.0259** |
 
+### Empirical Results on WeChat (Full Validation Set, 19,737 Users):
+
+| Re-Ranking Strategy | Recall@10 | NDCG@10 | Publisher Diversity@10 | Catalog Coverage@10 |
+|---|---|---|---|---|
+| **1. Pure Relevance** (Base) | 0.0023 | 0.0010 | 0.7869 | 39.71% |
+| **2. Hard Creator Cap** (max 2/creator) | 0.0023 | 0.0011 | 0.9530 | 41.83% |
+| **3. MMR Publisher ($\lambda=0.3$)** | **0.0030** (+30.4%) | **0.0013** (+30.0%) | **0.9623** (+22.3%) | **41.96%** (+5.7%) |
+| **4. MMR Publisher ($\lambda=0.5$)** | **0.0033** (+43.5%) | **0.0014** (+40.0%) | **1.0000** (+27.1%) | **43.10%** (+8.5%) |
+
 ### Key Findings:
-- **Win-Win Synergy:** MMR Publisher Diversification is the **only method that simultaneously improves accuracy and diversity**: it boosts Recall@10 by **+11.0%** (0.0154 → 0.0171) and NDCG@10 by **+9.8%**, while multiplying Publisher Diversity by **7.7x** (+672.6%). By penalizing creator redundancy, MMR surfaces relevant videos from diverse creators that the base model ranked slightly below the top 10.
-- **Embedding vs. Publisher Diversity:** MMR in embedding space degrades accuracy (-13.0% Recall), indicating that latent collaborative vectors capture user interest clusters that should not be artificially dispersed, whereas publisher overconcentration represents redundant creator exposure.
+- **Win-Win Synergy Across Both Platforms:** MMR Publisher Diversification consistently improves both diversity and accuracy. On WeChat, where creator redundancy was high (with popular creators occupying up to 5 slots in a single user's top-10 list), MMR diversification eliminates creator monopolies, boosting **Publisher Diversity from 0.7869 to 1.0000 (+27.1%)** and **Recall@10 by +43.5%** (0.0023 → 0.0033).
+- **Embedding vs. Publisher Diversity:** MMR in embedding space degrades accuracy (-13.0% Recall on TakaTak), indicating that latent collaborative vectors capture user interest clusters that should not be artificially dispersed, whereas publisher overconcentration represents redundant creator exposure.
 
 ---
 
