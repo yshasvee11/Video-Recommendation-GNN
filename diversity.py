@@ -1,17 +1,52 @@
 """
-diversity.py  –  Vynora 2.0: Diversity Recommendation (Paper 5 Implementation)
+diversity.py  –  Vynora 2.0: Diversity Metrics and Re-Ranking
 Reference: "Predicting diversification scores of videos in recommendation network"
            Selin Chun, Jinyoung Han, Daejin Choi, Taekyoung Kwon
            Expert Systems With Applications 238 (2024) 121803
 
+HONEST DESCRIPTION
+------------------
+This module implements parts of Paper 5, but NOT the full paper pipeline.
+
+What IS correctly implemented:
+  1. Publisher Diversity metric (Eq 1, Gini-Simpson formula) -- correct
+  2. Content Diversity metric (Eq 1 & 2, cosine distance, O(n*D) formula) -- correct
+     NOTE: content diversity uses collaborative latent embeddings (from the GNN),
+     NOT TF-IDF text vectors. Paper 5 uses TF-IDF of video captions/tags. The
+     metric is mathematically correct but measures embedding-space diversity, not
+     textual content diversity. Video text metadata is unavailable in this dataset.
+  3. Empirical Diversification Score S_v (Paper 5 Sec 3, Eq for S_i) -- correct
+     NOTE: computed over each user's full training interaction list, NOT over
+     recommendation-graph random walks as Paper 5 describes. The dataset provides
+     no recommendation edges or session boundaries.
+  4. MMR re-ranking (diverse_rerank, method='mmr') -- valid diversification baseline
+     NOTE: MMR is described in Paper 5's related work (Sec 2.1) as a baseline.
+     It is NOT Paper 5's primary method (predicted-score blending).
+
+What is implemented but NOT YET USED at inference (EXPERIMENTAL):
+  5. DiversificationGNN class -- implements Paper 5 Sec 4.5 architecture
+     (feature-augmented attention, node/edge propagation, MAE predictor MLP).
+     STATUS: Trained by train_diversification_predictor.py (Val MAE ~0.44 on
+     publisher targets -- WEAK; a constant-mean predictor achieves ~0.032 MAE
+     since targets cluster tightly near 0.97). The saved checkpoint is NOT
+     loaded during inference in diverse_rerank(). The 'score_rerank' method
+     recomputes empirical labels at runtime -- it is an empirical re-ranking
+     baseline, NOT Paper 5's predicted-score re-ranking.
+
+What is NOT implemented:
+  - Genre diversity (no genre metadata in dataset)
+  - Separate predictors per diversity type (Paper 5: genre, publisher, content)
+  - Loading trained GNN checkpoint for actual predicted-score re-ranking
+  - Random-walk based recommendation-edge graph (dataset has no recommendation edges)
+
 Implements:
-  1. Diversity Metrics (Eq 1 & 2): Publisher Diversity, Content Diversity, Entropy
-  2. Empirical Diversification Score Calculation (Section 3 & 4.3)
-  3. Diversification Score Prediction GNN with Feature-Augmented Attention (Section 4.5, Eq 3-8)
+  1. Diversity Metrics: Publisher Diversity, Content Diversity, Entropy
+  2. Empirical Diversification Score Calculation (empirical baseline, not Paper 5 GNN)
+  3. DiversificationGNN class [EXPERIMENTAL - not used at inference]
   4. Diversity-Aware Re-Ranking:
-     - Method A: Score Blending Re-Ranking (Section 7)
-     - Method B: Maximal Marginal Relevance (MMR) Intra-List Diversification (Section 2.1)
-  5. Batched Diversity Evaluation across user populations (Catalog Coverage, Gini Index)
+     - Method A: Empirical Score Blending (score_rerank) -- empirical labels, not GNN
+     - Method B: Maximal Marginal Relevance (mmr) -- valid diversification baseline
+  5. Batched Diversity Evaluation across user populations
 """
 
 import os
@@ -266,12 +301,31 @@ class FeatureAugmentedAttentionLayer(nn.Module):
 
 class DiversificationGNN(nn.Module):
     """
+    [EXPERIMENTAL — NOT CURRENTLY USED AT INFERENCE]
+
     Paper 5 Section 4.5 Diversification Score Prediction Model.
-    Architecture:
-      1. Node feature embedding: h_0 = W_embed * r_i (Eq 3)
-      2. Embedding propagation layers with feature-augmented attention (Eq 4-6)
-      3. Prediction MLP: S_hat = W_2(sigma(W_1 h_i)) (Eq 7)
-      4. Loss: MAE (Eq 8)
+
+    This class implements the Paper 5 GNN architecture. It is trained by
+    train_diversification_predictor.py. However, the saved checkpoint is NOT
+    currently loaded during diverse_rerank(). The 'score_rerank' method
+    recomputes empirical diversification labels at inference time — it does NOT
+    call this model.
+
+    Known issues with the current training setup:
+    - Val MAE ~0.44 on publisher targets (WEAK: constant-mean achieves ~0.032 MAE
+      because publisher diversification targets cluster tightly near 0.97).
+    - The co-occurrence graph used for training is derived from interaction-list order,
+      NOT from an observed recommendation-edge graph (which Paper 5 requires).
+    - Only publisher and content predictors are possible; genre is unavailable.
+
+    Architecture (Paper 5 Sec 4.5):
+      1. Node feature embedding: h_0 = W_embed * r_i  (Eq 3)
+      2. Embedding propagation layers with feature-augmented attention  (Eq 4-6)
+      3. Prediction MLP: S_hat = W_2(sigma(W_1 h_i))  (Eq 7)
+      4. Loss: MAE  (Eq 8)
+
+    Future work: Fix graph construction, retrain with proper session data,
+    load checkpoint in score_rerank for actual predicted-score re-ranking.
     """
     def __init__(self, in_features_dim: int, hidden_dim: int = 64, edge_dim: int = 4, n_layers: int = 2):
         super().__init__()
@@ -316,26 +370,30 @@ def diverse_rerank(candidate_ids,
                    diversification_scores=None,
                    video_embeddings=None):
     """
-    Re-rank candidate recommendations to optimize user diversity experiences.
+    Re-rank candidate recommendations to optimize intra-list diversity.
 
-    Implements:
-      Method A ('score_rerank' - Paper 5 Section 7):
-        S_final(v) = (1 - lambda) * S_rel(v) + lambda * S_div(v)
+    Method 'mmr' (Maximal Marginal Relevance) — RECOMMENDED:
+      Greedy selection balancing relevance with marginal distance to already-selected items.
+        arg max_{v in C \\ R} [ (1-lambda) * S_rel(v) + lambda * Dist(v, R) ]
+      This is a valid diversification baseline described in Paper 5 Sec 2.1.
 
-      Method B ('mmr' - Paper 5 Eq 1 & Section 2.1 Intra-List Distance Diversification):
-        Greedy selection balancing normalized relevance score with marginal diversity
-        distance to previously selected items:
-        arg max_{v in C \\ R} [ (1 - lambda) * S_rel(v) + lambda * Dist(v, R) ]
+    Method 'score_rerank' (Empirical Score Blending) — EMPIRICAL BASELINE:
+      S_final(v) = (1-lambda) * S_rel(v) + lambda * S_div(v)
+      where S_div(v) is the EMPIRICAL diversification score (average publisher/content
+      diversity across users who watched v in training data).
+      NOTE: This does NOT use the trained DiversificationGNN. It is an empirical
+      upper-bound baseline — it uses observed training signal, not predictions.
+      Paper 5's true method would use GNN-predicted scores at inference time.
 
     Args:
-        candidate_ids: array-like of candidate video IDs
+        candidate_ids: array-like of candidate video IDs (from top-100 pool)
         candidate_scores: array-like of base relevance scores
         dataset: VynoraDataset instance
         topk: number of recommendations to return
-        lambda_div: trade-off parameter in [0, 1]. 0 = pure relevance, 1 = max diversity
+        lambda_div: trade-off in [0, 1]. 0 = pure relevance, 1 = max diversity
         diversity_type: "publisher" | "content" | "hybrid"
         method: "mmr" | "score_rerank"
-        diversification_scores: pre-computed S_v diversification scores (required for score_rerank)
+        diversification_scores: pre-computed S_v empirical scores (for score_rerank)
         video_embeddings: [n_videos, D] embeddings (for content/hybrid diversity)
 
     Returns:
@@ -358,9 +416,16 @@ def diverse_rerank(candidate_ids,
 
     vloggers = dataset.vlogger_list
 
-    # ─────────────────────────────────────────────────────────
-    # Method A: Score Blending Re-Ranking (Paper 5 Section 7)
-    # ─────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # Method A: Empirical Score Blending (score_rerank)
+    # ─────────────────────────────────────────────────────────────────────────
+    # NOTE: This method does NOT load the saved DiversificationGNN checkpoint.
+    # It recomputes empirical publisher/content diversification scores S_v at
+    # inference time (the same labels used as GNN training targets).
+    # This is a valid empirical re-ranking baseline (rank by historical diversity
+    # signal), but it is NOT Paper 5's predicted-score re-ranking.
+    # Paper 5's method would load a trained GNN predictor, run forward inference
+    # on the co-occurrence graph, and use the GNN's output S_hat_v to re-rank.
     if method == "score_rerank":
         if diversification_scores is None:
             diversification_scores = compute_empirical_diversification_scores(

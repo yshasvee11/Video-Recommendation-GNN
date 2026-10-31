@@ -1,13 +1,34 @@
 """
 train_diversification_predictor.py  –  Vynora 2.0
-Train the Paper 5 Graph Neural Network Diversification Score Predictor.
+[EXPERIMENTAL] Train the Paper 5 DiversificationGNN predictor.
 Reference: Paper 5 Section 4.5 (Chun et al., Expert Systems with Applications 2024)
 
+WARNING — READ BEFORE USE:
+--------------------------
+1. The saved checkpoint is NOT loaded during inference.
+   diverse_rerank(method='score_rerank') recomputes empirical labels at runtime —
+   it does not call this model. To actually use predicted scores at inference,
+   you would need to load the checkpoint and run GNN forward in predict.py.
+
+2. Current training performance is WEAK:
+   - Saved Val MAE ~0.44 on publisher targets.
+   - A trivial constant-mean predictor achieves ~0.032 MAE because publisher
+     diversification targets cluster tightly near 0.97.
+   - The GNN is NOT outperforming a constant prediction.
+
+3. The co-occurrence graph used here is derived from interaction-list order
+   (consecutive item pairs per user), NOT from an observed recommendation-edge
+   graph. Paper 5 builds its graph from actual video recommendation transitions.
+   Our graph is a valid adaptation but is not the Paper 5 graph.
+
+4. Only publisher and content targets are supported. Paper 5 requires genre
+   targets, which need genre metadata unavailable in this dataset.
+
 Architecture:
-  - Node Feature Embedding: h_0 = W_embed * r_i (Eq 3)
-  - Feature-Augmented Attention Propagation (Eq 4-6)
-  - Prediction MLP: S_hat = W_2(sigma(W_1 h_i)) (Eq 7)
-  - Optimization with MAE Loss (Eq 8)
+  - Node Feature Embedding: h_0 = W_embed * r_i  (Eq 3)
+  - Feature-Augmented Attention Propagation  (Eq 4-6)
+  - Prediction MLP: S_hat = W_2(sigma(W_1 h_i))  (Eq 7)
+  - Optimization with MAE Loss  (Eq 8)
 
 Usage:
     python train_diversification_predictor.py --dataset takatak --epochs 30

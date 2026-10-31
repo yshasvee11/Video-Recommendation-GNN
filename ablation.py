@@ -1,16 +1,28 @@
 """
 ablation.py  –  Vynora 2.0
-Runs the six-variant ablation study described in the research plan:
+Six-variant ablation study of the Vynora RECOMMENDER model components.
 
-  A. MPGCL-style baseline      (only L_rank, no denoising, single view)
-  B. Baseline + vlogger nodes  (dual view, lambda scoring, L_vlogger)
-  C. Baseline + attention CL   (dual view + contrastive, no denoising)
-  D. Baseline + denoising      (single view + CONDE denoising, no CL)
-  E. B + D                     (dual view + denoising, no CL)
-  F. Full model                (dual view + CL + denoising)
+SCOPE CLARIFICATION:
+  This ablation studies the MAIN RECOMMENDER (VynoraGNN in model.py).
+  It is NOT an ablation of the Paper 5 DiversificationGNN predictor or
+  the diversity re-ranking module.
 
-Each variant toggles config flags and calls train() from train.py,
-writing separate result files per variant.
+  The six variants toggle: vlogger-view, cross-view CL, and edge pruning.
+
+Known result (from stored ablation_summary.json):
+  - Variant A (Baseline):         Recall@10 = 0.0484
+  - Variant B (+ Vlogger):        Recall@10 = 0.0471
+  - Variant F (Full model):       Recall@10 = 0.0468
+  The Full model underperforms the Baseline at current hyperparameters.
+  This result is reported transparently in results/ablation_summary.json.
+
+Variants:
+  A. Baseline           (only L_rank, no denoising, single view)
+  B. Baseline + vlogger (dual view, lambda scoring, L_vlogger)
+  C. Baseline + CL      (dual view + cross-view contrastive, no denoising)
+  D. Baseline + denoise (single view + edge pruning, no CL)
+  E. B + D              (dual view + denoising, no CL)
+  F. Full model         (dual view + CL + denoising)
 """
 
 import json

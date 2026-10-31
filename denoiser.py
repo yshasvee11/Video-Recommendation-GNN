@@ -1,12 +1,29 @@
 """
 denoiser.py  –  Vynora 2.0
-CONDE-style edge denoising for the tripartite graph.
+Edge reliability-based iterative graph pruning.
 
-CONDE's core denoising loop (from main.py):
-  1. After every D epochs, compute a reliability score for each edge
-  2. Accumulate: score_all = beta*score_old + (1-beta)*score_new
-  3. For each user, drop the lowest-scoring log2(|N(u)|)^gamma * R edges
-  4. Rebuild adjacency from retained edges only
+HONEST DESCRIPTION
+------------------
+This module implements an ITERATIVE EDGE PRUNING scheme inspired by CONDE
+(Paper 2). It is NOT a reproduction of CONDE. Key differences:
+
+  What we share with CONDE:
+    - After every D epochs, compute a per-edge reliability score
+    - Accumulate with EMA: score_ema = beta*score_old + (1-beta)*score_new
+    - For each user, drop the lowest-scoring log2(|N(u)|)^gamma * R edges
+    - Rebuild the adjacency matrix from retained edges only
+
+  What CONDE does that we do NOT:
+    - CONDE uses a TransformerEncoder over a user's full item-visit sequence
+      to produce reliability scores (sequence-aware, order-sensitive)
+    - CONDE incorporates concept nodes extracted from captions/comments/hashtags
+      for personalized concept-item selection (concept-aware denoising)
+    - CONDE's scorer is trained end-to-end as part of the recommendation objective
+    - Our EdgeReliabilityScorer (model.py) is a 2-layer MLP on (user_emb, item_emb)
+      pairs, evaluated with torch.no_grad() — NOT trained through BPR gradients
+
+This module is correctly described as: "MLP-based edge reliability scorer with
+EMA accumulation and logarithmic drop schedule (CONDE-inspired graph pruning)."
 
 This module manages:
   - Tracking raw edge lists (so we can rebuild sparse matrices)
@@ -55,7 +72,13 @@ def _build_sparse_from_coo(rows, cols, n_users, n_items):
 
 class GraphDenoiser:
     """
-    Manages CONDE-style iterative denoising for one graph view (UV or UA).
+    Iterative edge pruning for one graph view (User-Video or User-Vlogger).
+    Uses EMA-accumulated MLP reliability scores with a logarithmic drop schedule.
+
+    CONDE-INSPIRED (not a reproduction):
+    The drop rule, EMA accumulation, and rebuild mechanism follow CONDE's protocol.
+    The reliability scorer (EdgeReliabilityScorer in model.py) is an MLP, not
+    CONDE's TransformerEncoder or concept-aware scoring.
 
     Args:
         train_users : np.ndarray [E]  – source user IDs for each training edge
@@ -64,7 +87,7 @@ class GraphDenoiser:
         n_items     : int
         beta        : float            – EMA coefficient for score accumulation
         D           : int              – denoising interval (epochs)
-        R           : float            – CONDE R parameter (drop fraction)
+        R           : float            – CONDE R parameter (drop fraction base)
         gamma       : float            – CONDE gamma parameter (log2 scaling)
         epsilon     : int              – minimum neighbourhood size to trigger dropping
     """

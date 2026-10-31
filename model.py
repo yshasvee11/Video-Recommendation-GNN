@@ -1,27 +1,35 @@
 """
 model.py  –  Vynora 2.0
-Denoising & Vlogger-Aware Meta-Path Graph Contrastive Learning
+Creator-Aware Dual-View GNN with Cross-View Contrastive Learning and Edge Pruning.
 
-Architecture synthesises three papers:
-  • VA-GNN  : tripartite graph (User, Video, Vlogger) + dual-view propagation
-  • MPGCL   : meta-path graph views + cross-view contrastive learning (InfoNCE)
-  • CONDE   : edge reliability scoring → iterative graph denoising
+HONEST ARCHITECTURE NOTES
+--------------------------
+This model is INSPIRED by three papers, but is NOT a faithful reproduction of any:
 
-Key design decisions drawn from CONDE source code (Graph-Denoising-SocialRec):
-  - Edge reliability is a LEARNED scalar per edge, accumulated across epochs
-    (CONDE: relation_score_all_epoch = beta*old + (1-beta)*new, then drop lowest)
-  - Denoising happens at epoch boundaries, not every forward pass
-  - The GNN itself uses layer-aggregation concatenation (LightGCN-style)
+VA-GNN inspiration (Paper 4):
+  - We use the tripartite graph (User, Video, Vlogger) and dual-view propagation.
+  - We use a lambda-weighted scoring: s = lambda * s_video + (1 - lambda) * s_vlogger.
+  - DIFFERENCE: VA-GNN learns an adaptive gate conditioned on each candidate video and
+    its creator. We use a FIXED lambda (config.LAMBDA_VLOGGER = 0.5). This means our
+    scoring mixture is not data-driven. The creator-video relation is also not yet
+    incorporated as a separate propagation path during message passing.
 
-Key design decisions drawn from VA-GNN source code:
-  - Separate embedding tables for users, videos, vloggers
-  - Two adjacency matrices: User-Video (video-view) and User-Vlogger (vlogger-view)
-  - BPR loss with dual positive/negative streams
-  - Lambda-weighted scoring: s = lambda*s_video + (1-lambda)*s_vlogger
+MPGCL inspiration (Paper 3):
+  - We use a cross-view InfoNCE contrastive loss with a ProjectionHead (GELU + residual
+    + LayerNorm), which is structurally similar to MPGCL's contrastive component.
+  - DIFFERENCE: MPGCL constructs META-PATH-DERIVED HOMOGENEOUS graphs (e.g.,
+    User-Video-User, User-Vlogger-User meta-paths) as separate contrastive views.
+    We contrast the two DIRECT INTERACTION views (User-Video bipartite vs User-Vlogger
+    bipartite). This is a simpler dual-view contrast, not MPGCL meta-path graphs.
 
-Key design decisions drawn from MPGCL:
-  - ProjectionHead before InfoNCE (GELU + residual + LayerNorm)
-  - Symmetric InfoNCE loss across the two graph views
+CONDE inspiration (Paper 2):
+  - We implement an edge reliability scorer, EMA score accumulation across epochs,
+    and the logarithmic drop schedule (log2(|N(u)|)^gamma * R).
+  - DIFFERENCE: CONDE uses a TransformerEncoder over a user's full item-visit sequence
+    and concept-aware personalized selection. Our scorer is a lightweight MLP on
+    concatenated (user_emb, item_emb) pairs. It is NOT trained end-to-end through the
+    recommendation loss (edge scores are computed post-forward, via a separate
+    compute_edge_reliability_* call), so the pruning signal is weaker than CONDE's.
 """
 
 import torch
@@ -35,8 +43,12 @@ import config
 # ═══════════════════════════════════════════════════════════════
 class ProjectionHead(nn.Module):
     """
-    MPGCL-style projection head: Linear → GELU → Linear → Dropout → Residual → LayerNorm
-    Maps node embeddings into contrastive comparison space.
+    Projection head for cross-view contrastive learning.
+    Architecture: Linear -> GELU -> Linear -> Dropout -> Residual -> LayerNorm
+
+    INSPIRATION: MPGCL uses this design before InfoNCE.
+    NOTE: MPGCL applies this to meta-path homogeneous graph views.
+    Here it is applied to the two direct interaction views (User-Video, User-Vlogger).
     """
     def __init__(self, embed_dim: int, proj_dim: int, dropout: float):
         super().__init__()
@@ -60,13 +72,19 @@ class ProjectionHead(nn.Module):
 # ═══════════════════════════════════════════════════════════════
 class EdgeReliabilityScorer(nn.Module):
     """
-    Scores the reliability of a (user, neighbor) edge using their learned embeddings.
-    Output is a scalar in [0, 1] for each edge.
+    Lightweight MLP that scores the reliability of a (user, neighbor) edge using
+    their learned embeddings. Output is a scalar in [0, 1] per edge.
 
-    Adapted from CONDE's TransformerEncoder relation scorer:
-    Instead of a full Transformer over visited-item sequences (which requires
-    the full item history matrix), we use a lightweight MLP on concatenated
-    node pairs — appropriate for the VA-GNN data format.
+    INSPIRATION: CONDE's edge reliability scoring concept (periodic scoring +
+    EMA accumulation + log-scale drop rule, managed by GraphDenoiser in denoiser.py).
+
+    KEY DIFFERENCE FROM CONDE:
+    - CONDE uses a TransformerEncoder over a user's full item-visit sequence and
+      performs personalized concept-aware selection.
+    - This scorer is a 2-layer MLP on concatenated (src_emb, dst_emb) pairs.
+    - It is NOT trained end-to-end through the recommendation loss. Scores are
+      computed post-forward via compute_edge_reliability_*() with torch.no_grad(),
+      so the pruning signal does not flow through the BPR gradient.
     """
     def __init__(self, embed_dim: int):
         super().__init__()
@@ -105,17 +123,22 @@ def light_gcn_propagate(adj: torch.Tensor, emb: torch.Tensor) -> torch.Tensor:
 # ═══════════════════════════════════════════════════════════════
 class VynoraGNN(nn.Module):
     """
-    Vynora 2.0 – Denoising & Vlogger-Aware Meta-Path Graph Contrastive Learning.
+    Vynora – Creator-Aware Dual-View GNN with Cross-View Contrastive Learning.
 
-    Two-view propagation:
+    Two-view propagation (VA-GNN inspired):
       view_v  (video-view)   : propagates over User-Video adjacency
       view_a  (vlogger-view) : propagates over User-Vlogger adjacency
 
-    Graph denoising (CONDE-style, applied externally between epochs):
-      The caller maintains a running reliability score per edge and passes
-      masked/pruned adjacency matrices after every D epochs.
+    Edge pruning (CONDE-inspired, applied externally between epochs):
+      The caller accumulates EMA reliability scores per edge and passes
+      pruned adjacency matrices after every D epochs.
 
-    Loss:
+    Score mixing (VA-GNN pattern, simplified):
+      s(u, v) = lambda * (u_v . v_v) + (1-lambda) * (u_a . p_a)
+      NOTE: lambda is FIXED at config.LAMBDA_VLOGGER. VA-GNN learns an adaptive
+      gate conditioned on each candidate video and its creator.
+
+    Total loss:
       L = L_bpr_uv + beta * L_cl + gamma * L_den + delta * L_bpr_ua
     """
 
@@ -145,7 +168,9 @@ class VynoraGNN(nn.Module):
         self.edge_scorer_uv = EdgeReliabilityScorer(D)
         self.edge_scorer_ua = EdgeReliabilityScorer(D)
 
-        # ── Scoring lambda ─────────────────────────────────────────────
+        # ── Scoring lambda (FIXED — not a learned adaptive gate like VA-GNN) ────────
+        # VA-GNN learns a gate conditioned on each candidate video and its creator.
+        # Here we use a fixed config constant. Future work: learn this per-candidate.
         self.lambda_vlogger = config.LAMBDA_VLOGGER
 
     # ────────────────────────────────────────────────────────────────
@@ -243,10 +268,15 @@ class VynoraGNN(nn.Module):
 
     def contrastive_loss(self, user_v, user_a, batch_users):
         """
-        Cross-view InfoNCE loss (MPGCL-style).
+        Cross-view InfoNCE loss (dual-view contrast, MPGCL-inspired).
         Aligns user representations from video-view and vlogger-view.
         Positives: same user across the two views.
         Negatives: all other users in the batch.
+
+        NOTE: MPGCL uses meta-path-derived homogeneous graphs as the two views
+        (e.g., User-Video-User and User-Vlogger-User meta-path adjacencies).
+        Here we contrast the two DIRECT interaction views (User-Video bipartite
+        vs User-Vlogger bipartite). This is simpler but structurally analogous.
         """
         z_v = F.normalize(self.proj_v(user_v[batch_users]), dim=-1)   # [B, proj_dim]
         z_a = F.normalize(self.proj_a(user_a[batch_users]), dim=-1)   # [B, proj_dim]
