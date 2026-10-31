@@ -61,7 +61,8 @@ def train():
     model = VynoraGNN(
         n_users   = dataset.n_users,
         n_videos  = dataset.n_videos,
-        n_vloggers= dataset.n_vloggers
+        n_vloggers= dataset.n_vloggers,
+        vlogger_list = dataset.vlogger_list
     ).to(config.DEVICE)
 
     optimizer = Adam(model.parameters(), lr=config.LR)
@@ -109,8 +110,8 @@ def train():
         graph_uv = denoiser_uv.graph
         graph_ua = denoiser_ua.graph
 
-        # BPR sampling
-        S, S2 = uniform_sample(dataset, config.NEG_K)
+        # BPR sampling with Sagittarius frequency weights
+        S, S2, W = uniform_sample(dataset, config.NEG_K)
         if len(S) == 0:
             print(f"[Epoch {epoch}] WARNING: empty training batch - skipping")
             continue
@@ -121,10 +122,11 @@ def train():
         neg_videos  = torch.LongTensor(S[:, 2]).to(config.DEVICE)
         pos_vloggers= torch.LongTensor(S[:, 3]).to(config.DEVICE)
         neg_vloggers= torch.LongTensor(S[:, 4]).to(config.DEVICE)
+        weights     = torch.FloatTensor(W).to(config.DEVICE)
 
         (users, pos_videos, neg_videos,
-         pos_vloggers, neg_vloggers) = shuffle(users, pos_videos, neg_videos,
-                                               pos_vloggers, neg_vloggers)
+         pos_vloggers, neg_vloggers, weights) = shuffle(users, pos_videos, neg_videos,
+                                                       pos_vloggers, neg_vloggers, weights)
 
         users2        = torch.LongTensor(S2[:, 0]).to(config.DEVICE) if len(S2) > 0 else None
         pos_vloggers2 = torch.LongTensor(S2[:, 1]).to(config.DEVICE) if len(S2) > 0 else None
@@ -135,10 +137,10 @@ def train():
         n_batches  = 0
 
         batches = list(minibatch(users, pos_videos, neg_videos,
-                                 pos_vloggers, neg_vloggers,
+                                 pos_vloggers, neg_vloggers, weights,
                                  batch_size=config.BPR_BATCH))
 
-        for batch_idx, (u_b, pv_b, nv_b, pa_b, na_b) in enumerate(batches):
+        for batch_idx, (u_b, pv_b, nv_b, pa_b, na_b, w_b) in enumerate(batches):
             optimizer.zero_grad()
 
             # Forward pass
@@ -148,14 +150,19 @@ def train():
             user_a    = emb["user_a"]
             vlogger_a = emb["vlogger_a"]
 
-            # L_rank: primary BPR
+            # L_rank: primary BPR with frequency weights (Sagittarius adaptation)
             loss_bpr = model.bpr_loss_uv(
                 u_b, pv_b, nv_b, pa_b, na_b,
-                user_v, video_v, user_a, vlogger_a
+                user_v, video_v, user_a, vlogger_a,
+                weights=w_b
             )
 
-            # L_cl: cross-view contrastive (MPGCL)
-            loss_cl = model.contrastive_loss(user_v, user_a, u_b)
+            # L_cl: VA-GNN 3-Entity cross-view contrastive loss (Users, Videos, Creators)
+            loss_cl = model.contrastive_loss(
+                user_v, user_a, u_b,
+                video_v=video_v, vlogger_a=vlogger_a,
+                batch_videos=pv_b, batch_vloggers=pa_b
+            )
 
             # L_den: denoising consistency
             loss_den = model.denoising_consistency_loss(user_v, user_a, u_b)
@@ -247,7 +254,7 @@ def train():
 
     ckpt = torch.load(os.path.join(config.CKPT_DIR, f"best_{config.DATASET}.pt"),
                       map_location=config.DEVICE)
-    model.load_state_dict(ckpt["model_state"])
+    model.load_state_dict(ckpt["model_state"], strict=False)
 
     test_results = evaluate(model, dataset, denoiser_uv.graph, denoiser_ua.graph,
                             mode="test")

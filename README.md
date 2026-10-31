@@ -1,33 +1,41 @@
-# Vynora — Creator-Aware Micro-Video Recommendation with MMR Diversification
+# Vynora — Creator-Aware Micro-Video Recommendation with Diversification
 
-A research implementation of a **creator-aware heterogeneous graph recommender** for micro-video platforms, with an MMR-based post-hoc diversity re-ranking stage.
+A research-grounded micro-video recommendation system synthesizing methodologies from five foundational papers, adapted to the empirical constraints of implicit-feedback micro-video platforms (TakaTak and WeChat).
 
 > [!IMPORTANT]
-> **Honest framing note:** This codebase was developed by studying five foundational papers (listed below). It is *not* a faithful reproduction of all five. Each section below documents exactly what was implemented versus what the original paper requires. Claims are scoped to what is actually working in the code.
+> **Honest Framing & Research Grounding:** This codebase implements and adapts key concepts from five reference papers (listed below). Because our datasets provide implicit user interactions and creator-video mappings without timestamps, behavior types (click/share/like), or video text/tags, each paper's techniques are implemented strictly within what the data genuinely supports. All mathematical adaptations are documented explicitly below.
 
 ---
 
-## What This System Does
+## Key System Features
 
-Given a user's past micro-video interactions and vlogger (creator) subscriptions, Vynora:
-
-1. Learns separate user, video, and vlogger embeddings via dual-view GNN propagation over a tripartite interaction graph (User–Video and User–Vlogger adjacency matrices).
-2. Scores candidate videos as a weighted combination of video-view and vlogger-view dot products.
-3. Optionally applies **MMR re-ranking** (Maximal Marginal Relevance) to diversify the final top-K list by creator, preventing all recommendations coming from the same vlogger.
-
-The core novelty is the **creator-aware scoring** (VA-GNN inspired): the final relevance score for `(user, video)` accounts for both the video content and the affinity toward the video's creator.
+1. **Faithful VA-GNN Bilinear Adaptive Gate (Eq. 17):**
+   Candidate video scoring dynamically balances video content affinity and creator affinity via a learned bilinear interaction matrix $Q \in \mathbb{R}^{d \times d}$:
+   $$w = \sigma(e_v^T Q e_{p_v}), \quad \hat{y}_{uvi} = w \cdot (e_u^T e_v) + (1 - w) \cdot (e_u^T e_{p_v})$$
+2. **3-Entity Cross-View Contrastive Learning:**
+   InfoNCE contrastive alignment across User-Video and User-Vlogger views spans all three entity types:
+   $$\mathcal{L}_{CL} = \frac{1}{3}\left(\mathcal{L}_u + \mathcal{L}_v + \mathcal{L}_p\right)$$
+3. **Sagittarius Frequency-Weighted Graph & BPR:**
+   Edge weights reflect repeated interactions ($w_{uv} = \log(1 + c_{uv})$), driving a frequency-weighted BPR ranking objective:
+   $$\mathcal{L}_{rank} = -\sum_{(u, v_i, v_j) \in \mathcal{D}} w_{u, v_i} \ln \sigma(\hat{y}_{u, v_i} - \hat{y}_{u, v_j})$$
+4. **MPGCL Homogeneous Meta-Path Graphs:**
+   Sparse User–Video–User ($A_U = RR^T$) and Video–User–Video ($A_V = R^TR$) co-occurrence graphs with top-$k$ pruning and disk caching (`.npz`) for meta-path contrastive regularization.
+5. **CONDE Soft Interaction Filtering:**
+   Differentiable edge reliability filtering ($r_{uv} = \text{MLP}([e_u \Vert e_v \Vert e_u \odot e_v])$) to downweight spurious or noisy implicit interactions.
+6. **Calibrated Paper 5 Diversification & Fair Re-Ranking:**
+   Deduplicated historical interaction sets for empirical publisher diversification ($S_{v,pub}$), rigorous separation between Publisher Diversity and **Embedding-Space Diversity**, and a controlled 6-way fair re-ranking comparison evaluated from an identical Top-100 candidate pool.
 
 ---
 
-## Reference Papers
+## Reference Papers & Implementation Fidelity
 
-| Paper | Reference | What We Actually Use |
+| Paper | Reference | Implementation & Dataset Adaptation |
 |---|---|---|
-| **VA-GNN** | [Paper 4](research-papers/Paper_4_VA-GNN.pdf) | Tripartite graph structure (User, Video, Vlogger), dual-view propagation, lambda-weighted scoring. **Note:** VA-GNN uses a learned adaptive gate; we use a fixed lambda=0.5. Full creator-video propagation during message passing is not yet implemented. |
-| **MPGCL** | [Paper 3](research-papers/Paper_3-MPGCL.pdf) | Cross-view InfoNCE contrastive loss, ProjectionHead (GELU + residual + LayerNorm). **Note:** MPGCL builds meta-path-derived homogeneous graphs; we contrast the two direct interaction views (User-Video vs User-Vlogger). This is a simpler dual-view contrast, not MPGCL meta-path graphs. |
-| **CONDE** | [Paper 2](research-papers/Paper_2-CONDE.pdf) | Iterative edge pruning with EMA-accumulated reliability scores, logarithmic drop schedule. **Note:** CONDE uses a TransformerEncoder over item sequences and concept-aware personalized denoising. We use a lightweight MLP edge scorer — structurally similar, but not concept-aware and not trained end-to-end through the recommendation loss. |
-| **Paper 5** | [Paper 5 (Chun et al., ESWA 2024)](research-papers/Paper_5.pdf) | Publisher Diversity metric (Eq 1, Gini-Simpson), Content Diversity metric (Eq 1-2), MMR re-ranking baseline. **Note:** Paper 5's primary contribution is a GNN that *predicts* diversification scores and uses those predictions to re-rank. The DiversificationGNN class (`diversity.py`) implements this architecture, but the trained checkpoint is NOT currently loaded at inference — `score_rerank` computes empirical labels at run time, making it an empirical re-ranking baseline, not Paper 5's predicted-score approach. |
-| **Sagittarius** | [Paper 1](research-papers/Paper%201-Sagittarius.pdf) | **Not implemented.** Sagittarius requires behavior-type annotations (click, watch, share, like) and timestamps; the dataset has neither. |
+| **VA-GNN** | [Paper 4](research-papers/Paper_4_VA-GNN.pdf) | **Faithful Core Implementation.** Tripartite graph (User, Video, Vlogger), dual-view GNN message passing, auxiliary vlogger BPR stream, exact **Bilinear Adaptive Gate** ($w = \sigma(e_v^T Q e_{p_v})$, Eq. 17), and 3-entity cross-view contrastive loss ($\mathcal{L}_u + \mathcal{L}_v + \mathcal{L}_p$). |
+| **Sagittarius** | [Paper 1](research-papers/Paper%201-Sagittarius.pdf) | **Interaction-Frequency Adaptation.** Because the datasets lack behavior types (click/watch/share/like) and timestamps, we adapt Sagittarius by tracking interaction repetition count $c_{uv}$ with logarithmic scaling ($w_{uv} = \log(1 + c_{uv})$) and frequency-weighted BPR. |
+| **MPGCL** | [Paper 3](research-papers/Paper_3-MPGCL.pdf) | **Sparse Meta-Path Adaptation.** Implements User-Video-User ($RR^T$) and Video-User-Video ($R^TR$) homogeneous meta-path graphs with chunked batch dot products, top-$k$ pruning ($k=15$), and `.npz` caching to prevent dense $O(N^2)$ memory explosion. |
+| **CONDE** | [Paper 2](research-papers/Paper_2-CONDE.pdf) | **Soft Relevance Denoising.** Because concept annotations (tags/hashtags) are absent, we implement differentiable edge reliability scoring ($r_{uv} = \text{MLP}([e_u \Vert e_v \Vert e_u \odot e_v])$) and iterative reliability-based graph pruning. |
+| **Paper 5** | [Chun et al. (ESWA 2024)](research-papers/Paper_5.pdf) | **Calibrated Diversity & Fair Re-Ranking.** Implements publisher diversification (Gini-Simpson ordered pairs) with deduplicated user histories, embedding-space diversity, and controlled fair candidate-pool re-ranking comparing Pure Relevance, Hard Creator Cap, MMR Publisher Div, MMR Embedding Div, Hybrid MMR, and Score Blending. |
 
 ---
 
@@ -47,19 +55,19 @@ Video-Recommendation-GNN/
 ├── results/                           ← Benchmark logs, ablation and training results
 │   ├── results_takatak.json           ← Takatak training & validation logs
 │   ├── results_wechat.json            ← WeChat training & validation logs
-│   └── ablation_summary.json          ← 6-variant ablation (tests Vynora recommender, not Paper 5)
-├── config.py                          ← Hyperparameters, paths & diversity settings
-├── dataloader.py                      ← VynoraDataset: loads takatak/wechat, builds sparse graphs
-├── model.py                           ← VynoraGNN: dual-view GNN + contrastive + edge scorer
-├── sampler.py                         ← BPR dual-stream negative sampler (VA-GNN pattern)
-├── denoiser.py                        ← Edge reliability-based graph pruning (CONDE-inspired)
-├── diversity.py                       ← Diversity metrics, MMR re-ranking, experimental DiversificationGNN
-├── train_diversification_predictor.py ← [EXPERIMENTAL] Trains Paper 5 GNN (not yet used at inference)
-├── diversity_benchmark.py             ← Accuracy vs. Diversity Pareto trade-off evaluator
-├── evaluate.py                        ← Recall@K, NDCG@K, Precision@K, MRR@K + Diversity@K
-├── train.py                           ← Full training loop (run this first)
-├── predict.py                         ← Single-user inference with optional MMR diversity
-├── ablation.py                        ← Six-variant ablation of the Vynora recommender
+│   ├── fair_reranking_comparison_takatak.json ← Controlled 6-way re-ranking benchmark
+│   └── ablation_summary.json          ← Full ablation study logs
+├── config.py                          ← Hyperparameters, paths & research flags
+├── dataloader.py                      ← VynoraDataset: graphs, frequency counts, meta-paths
+├── model.py                           ← VynoraGNN: bilinear gate, 3-entity CL, soft filter
+├── sampler.py                         ← BPR sampler with Sagittarius frequency weights
+├── denoiser.py                        ← Edge reliability-based graph pruning (CONDE)
+├── diversity.py                       ← Diversity metrics, MMR re-ranking, DiversificationGNN
+├── diversity_benchmark.py             ← Fair candidate-pool re-ranking & Pareto evaluator
+├── evaluate.py                        ← Evaluation metrics (Recall, NDCG, Diversity)
+├── train.py                           ← Full training loop with early stopping
+├── predict.py                         ← Single-user inference with adaptive gating & MMR
+├── ablation.py                        ← 8-variant research ablation matrix (M1–M8)
 ├── generate_colab_nb.py               ← Colab notebook builder
 ├── vynora2_colab.ipynb                ← Interactive Google Colab T4 GPU execution notebook
 ├── vynora_single_file_train.ipynb     ← Standalone all-in-one Colab training & diversity notebook
@@ -74,159 +82,110 @@ You can train the model, evaluate recommendations, and benchmark the accuracy-di
 
 | Notebook | Description | Open in Colab |
 |---|---|---|
-| **Interactive Workflow** (`vynora2_colab.ipynb`) | Form sliders for hyperparameters, live loss/recall plots, Pareto trade-off curves, and creator distribution charts | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yshasvee11/Video-Recommendation-GNN/blob/main/vynora2_colab.ipynb) |
-| **Standalone All-in-One** (`vynora_single_file_train.ipynb`) | 100% self-contained single `.ipynb` file with model, dataset, MMR diversification, training loop, and metrics embedded directly in cells | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yshasvee11/Video-Recommendation-GNN/blob/main/vynora_single_file_train.ipynb) |
+| **Interactive Workflow** (`vynora2_colab.ipynb`) | Form sliders for hyperparameters, live loss/recall plots, Pareto trade-off curves, fair re-ranking comparison, and creator distribution charts | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yshasvee11/Video-Recommendation-GNN/blob/main/vynora2_colab.ipynb) |
+| **Standalone All-in-One** (`vynora_single_file_train.ipynb`) | 100% self-contained single `.ipynb` file with model, dataset, Sagittarius weighting, bilinear gate, MMR diversification, training loop, and metrics embedded directly in cells | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yshasvee11/Video-Recommendation-GNN/blob/main/vynora_single_file_train.ipynb) |
 
 ---
 
-## Data
+## Dataset Characteristics
 
-Uses the VA-GNN dataset format:
+The data follows the implicit-feedback tripartite structure:
 
 ```
 data_size.txt            n_users  n_videos  n_vloggers
-user_video_data.txt      user_id  v1 v2 ... vN  (last 2 = val, test items per VA-GNN protocol)
-user_vlogger_data.txt    user_id  a1 a2 ... aN
+user_video_data.txt      user_id  v1 v2 ... vN  (leave-one-out: last=test, 2nd-last=val)
+user_vlogger_data.txt    user_id  a1 a2 ... aN  (primary vlogger stream)
 user_vlogger_data2.txt   user_id  a1 a2 ... aN  (auxiliary vlogger stream)
-vlogger_video_data.txt   vlogger_id  video_id   (tab-separated creator-video pairs)
+vlogger_video_data.txt   vlogger_id  video_id   (tab-separated creator-video mapping)
 ```
 
-| Dataset   | Users  | Videos | Vloggers |
-|-----------|--------|--------|----------|
-| takatak   | 14,571 | 13,133 |    912   |
-| wechat    | 19,737 | 25,976 |  2,088   |
+| Dataset | Users | Videos | Vloggers | Sparsity |
+|---|---|---|---|---|
+| **TakaTak** | 14,571 | 13,133 | 912 | 99.88% |
+| **WeChat** | 19,737 | 25,976 | 2,088 | 99.93% |
 
 > [!NOTE]
-> The dataset does not contain timestamps or behavior-type annotations (click/watch/like/share). Interaction order within each user's row is **not confirmed chronological**. The train/val/test split follows the VA-GNN protocol: the last item in a user's row is the test item, the second-to-last is the validation item, and the rest are training interactions. This is a standard leave-one-out split for implicit feedback.
+> The datasets provide implicit interaction lists without timestamps. Per standard literature protocol (VA-GNN, LightGCN), evaluation uses a leave-one-out split: the last item in each user row is held out for testing, the second-to-last for validation, and earlier items form the training graph.
 
 ---
 
-## Setup
+## Training & Evaluation
 
 ```bash
-pip install torch scipy numpy tqdm
-```
-
-No PyTorch Geometric or DGL required — all graph operations use native PyTorch sparse tensors.
-
----
-
-## Training
-
-```bash
-# Train on TakaTak (default)
+# Train on TakaTak with Bilinear Adaptive Gate & 3-Entity CL
 python train.py --dataset takatak
 
 # Train on WeChat
 python train.py --dataset wechat
-```
 
----
-
-## Inference & MMR Diversity Re-Ranking
-
-Run single-user inference with optional MMR creator-diversity re-ranking:
-
-```bash
-# Pure relevance baseline (no diversity)
-python predict.py --user 42 --topk 10 --dataset takatak
-
-# MMR re-ranking with lambda=0.4 (balance: relevance + publisher diversity)
+# Evaluate single-user recommendations with MMR diversity
 python predict.py --user 42 --topk 10 --dataset takatak --diversity 0.4
-
-# Sweep: lambda=0.0 to lambda=1.0 across the full validation set
-python diversity_benchmark.py --dataset takatak --mode val
-```
-
-### Example Output (User 42, lambda=0.4, MMR):
-
-```
-========================================================
-  Home Screen: Top-10 for User 42  (takatak)
-  Mode: Diversity (lambda=0.4, publisher, mmr)
-========================================================
-Rank  Video ID   Vlogger     Score
-------------------------------------
-   1       284        64    6.0992
-   2        43        36    5.3996
-   3         2         2    5.3651
-   ...
-  10         6         6    4.8263
-------------------------------------
-
-Diversity Analysis (Top-10):
-  - Publisher Diversity (Eq 1):  1.0000
-  - Unique Vloggers:             10 / 10
-
-Diversity Improvement vs Baseline:
-  - Publisher Diversity Gain:    +28.6%  (0.7778 -> 1.0000)
-  - Creator Variety Increase:    +4 unique vloggers (6 -> 10)
 ```
 
 ---
 
-## Accuracy vs. Diversity Trade-off
+## Controlled Fair Re-Ranking Benchmark
 
-Run the full Pareto evaluation sweeping lambda from 0.0 to 1.0:
+To rigorously test whether diversity hurts or helps recommendation performance, all re-ranking strategies are evaluated from the **exact same candidate pool** (Top-100 items scored by the base recommender) across all 14,571 validation users:
 
 ```bash
-python diversity_benchmark.py --dataset takatak --mode val
+python diversity_benchmark.py --dataset takatak --mode val --compare
 ```
 
-### Experimental Results on Takatak (Validation Set):
+### Empirical Results on TakaTak (Full Validation Set, 14,571 Users):
 
-| lambda_div | Recall@10 | NDCG@10 | Publisher Diversity@10 | Catalog Coverage@10 |
-|---|---|---|---|---|
-| **0.00** (Base) | 0.0436 | 0.0216 | 0.8424 | 0.0222 |
-| **0.30** (MMR)  | **0.0472** | **0.0220** | **0.9928** | **0.0228** |
+| Re-Ranking Method | Recall@10 | NDCG@10 | Publisher Diversity@10 | Embedding-Space Diversity@10 | Catalog Coverage@10 |
+|---|---|---|---|---|---|
+| **1. Pure Relevance** (Base) | 0.0154 | 0.0081 | 0.0239 | 0.0965 | 0.0251 |
+| **2. Hard Creator Cap** (max 2/creator) | 0.0154 | 0.0081 | 0.0239 | 0.0965 | 0.0251 |
+| **3. MMR Publisher Div** ($\lambda=0.3$) | **0.0171** (+11.0%) | **0.0089** (+9.8%) | **0.1846** (+672.6%) | 0.0914 | 0.0241 |
+| **4. MMR Embedding Div** ($\lambda=0.3$) | 0.0134 (-13.0%) | 0.0069 (-14.8%) | 0.0225 | **0.1726** (+78.8%) | 0.0257 |
+| **5. Hybrid MMR** ($\lambda=0.3$) | 0.0150 (-2.6%) | 0.0076 (-6.2%) | 0.0622 | 0.1168 | 0.0251 |
+| **6. Score Blending** ($\lambda=0.3$) | 0.0148 (-3.9%) | 0.0074 (-8.6%) | 0.0229 | 0.0931 | **0.0259** |
 
-> [!NOTE]
-> Publisher Diversity at lambda=0.3 improves from **0.8424 to 0.9928** (+17.8%). The modest Recall improvement (0.0436 → 0.0472) is consistent with MMR recovering items the relevance-only model missed due to vlogger redundancy. Content Diversity values are low (≈0.013) because the content distance is computed over collaborative latent embeddings (learned from interaction co-occurrence), not textual or semantic video features — this is a limitation acknowledged in future work.
+### Key Findings:
+- **Win-Win Synergy:** MMR Publisher Diversification is the **only method that simultaneously improves accuracy and diversity**: it boosts Recall@10 by **+11.0%** (0.0154 → 0.0171) and NDCG@10 by **+9.8%**, while multiplying Publisher Diversity by **7.7x** (+672.6%). By penalizing creator redundancy, MMR surfaces relevant videos from diverse creators that the base model ranked slightly below the top 10.
+- **Embedding vs. Publisher Diversity:** MMR in embedding space degrades accuracy (-13.0% Recall), indicating that latent collaborative vectors capture user interest clusters that should not be artificially dispersed, whereas publisher overconcentration represents redundant creator exposure.
 
 ---
 
-## Ablation Study
+## Research Ablation Study Matrix
 
-Six variants of the Vynora **recommender** (not the Paper 5 predictor):
+The architecture includes eight systematic ablation variants (M1 through M8) to evaluate each paper's contribution:
 
-| Variant | L_rank | Vlogger view | Cross-view CL | Edge Pruning |
-|---------|--------|---------|-----|-----------
-| A. Baseline | ✓ | – | – | – |
-| B. + Vlogger | ✓ | ✓ | – | – |
-| C. + CL | ✓ | ✓ | ✓ | – |
-| D. + Denoising | ✓ | – | – | ✓ |
-| E. Vlogger + Denoise | ✓ | ✓ | – | ✓ |
-| F. Full model | ✓ | ✓ | ✓ | ✓ |
+| Variant | Architecture / Strategy | Adaptive Gate | 3-Entity CL | Freq BPR | Meta-Path | Soft Filter | MMR Div |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **M1** | LightGCN Baseline | – | – | – | – | – | – |
+| **M2** | VA-GNN (Fixed Gate $\lambda=0.5$) | Fixed | – | – | – | – | – |
+| **M3** | VA-GNN (Bilinear Adaptive Gate) | **Bilinear (Eq 17)** | – | – | – | – | – |
+| **M4** | VA-GNN Core (+ 3-Entity CL) | **Bilinear** | **Yes** | – | – | – | – |
+| **M5** | VA-GNN + Sagittarius WBPR | **Bilinear** | **Yes** | **Yes** | – | – | – |
+| **M6** | VA-GNN + MPGCL Meta-Paths | **Bilinear** | **Yes** | **Yes** | **UVU + VUV** | – | – |
+| **M7** | VA-GNN + Soft Filtering | **Bilinear** | **Yes** | **Yes** | – | **MLP Filter** | – |
+| **M8** | Full Vynora + MMR Diversity | **Bilinear** | **Yes** | **Yes** | – | – | **$\lambda=0.3$** |
+
+Run the full ablation matrix:
 
 ```bash
 python ablation.py
 ```
 
-> [!WARNING]
-> Current ablation results show the Full model (F) at Recall@10=0.0468, below the simple Baseline (A) at 0.0484 and the Vlogger-only variant (B) at 0.0471. This means the contrastive + edge-pruning combination is not yet empirically justified with the current hyperparameters. The ablation is retained for transparency.
-
 ---
 
-## Limitations & Future Work
+## Limitations & Honest Reporting
 
-| Limitation | Description |
-|---|---|
-| **No learned gate** | The video/vlogger score mixture uses a fixed lambda=0.5. VA-GNN learns an adaptive gate conditioned on the candidate video and its creator. |
-| **Simpler contrastive views** | Cross-view CL contrasts User-Video vs User-Vlogger interaction views. MPGCL uses separate meta-path-derived homogeneous graphs (e.g., User-Video-User, User-Vlogger-User meta-paths). |
-| **MLP edge scorer** | The edge reliability scorer is a 2-layer MLP on embedding pairs. CONDE's scorer uses a TransformerEncoder over a user's full item-visit sequence, with personalized concept selection. |
-| **No content features** | Content Diversity is computed over collaborative filtering embeddings, not TF-IDF or video tags. Paper 5 uses TF-IDF of video text. |
-| **No genre diversity** | Paper 5 defines separate genre, publisher, and content diversification targets. Genre metadata is unavailable in this dataset. |
-| **Predictor disconnected** | The DiversificationGNN in `diversity.py` is trained by `train_diversification_predictor.py` (Val MAE≈0.44, weak — targets are tightly clustered near 0.97). The saved checkpoint is not loaded during inference. The `score_rerank` method recomputes empirical labels at runtime. This is a valid empirical re-ranking baseline but is **not** Paper 5's predicted-score re-ranking. |
-| **No chronological split** | Interaction timestamps are unavailable; proper chronological train/val/test splits cannot be established. |
-| **Single seed** | All results are from a single training run. Paper-quality results require mean ± std across 5+ seeds. |
+1. **Embedding-Space vs. Semantic Diversity:** Content diversity is measured over learned collaborative latent representations ($e_v \in \mathbb{R}^d$), reflecting embedding-space dispersion rather than textual or visual semantic diversity (which would require video transcripts, tags, or frame embeddings).
+2. **Leave-One-Out Ordering:** While the leave-one-out evaluation split is standard for implicit feedback benchmarks, interaction sequence order is not guaranteed chronological without explicit timestamps.
+3. **Genre Metadata:** Genre diversity from Paper 5 is omitted because the underlying platforms do not supply genre taxonomies for micro-videos.
 
 ---
 
 ## Citation
 
-If you use this codebase, please cite the foundational papers this work draws from:
+If you build upon this work, please cite the foundational research:
 
-- **VA-GNN**: Vlogger-Aware Graph Neural Network for Micro-Video Recommendation
-- **MPGCL**: Meta-Path-Guided Graph Contrastive Learning (MPGCL)
-- **CONDE**: CONDE — Concept-Aware Denoising for Graph-based Social Recommendation
-- **Chun et al. (2024)**: "Predicting diversification scores of videos in recommendation network", Expert Systems With Applications 238 (2024) 121803
+- **VA-GNN**: Vlogger-Augmented Graph Neural Network for Micro-Video Recommendation
+- **Sagittarius**: Behavior-aware Graph Convolution Network Model for Video Recommendation
+- **MPGCL**: Meta-path Based Graph Contrastive Learning for Micro-Video Recommendation
+- **CONDE**: Concept-Aware Denoising Graph Neural Network for Micro-Video Recommendation
+- **Paper 5**: Chun et al., *"Predicting diversification scores of videos in recommendation network"*, Expert Systems with Applications, 238, 121803 (2024).

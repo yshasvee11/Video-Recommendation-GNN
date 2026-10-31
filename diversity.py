@@ -182,6 +182,8 @@ def compute_empirical_diversification_scores(dataset,
 
     if diversity_type == "publisher":
         for u, vids in enumerate(allPos_video):
+            # Deduplicate user history so repeated views do not distort creator distribution
+            vids = list(dict.fromkeys(vids))
             n = len(vids)
             if n >= 2:
                 u_vlogs = [vloggers[v] for v in vids]
@@ -191,7 +193,7 @@ def compute_empirical_diversification_scores(dataset,
             else:
                 user_div[u] = 1.0
 
-    elif diversity_type == "content":
+    elif diversity_type in ("content", "embedding_space"):
         if video_embeddings is None:
             raise ValueError("video_embeddings must be provided to compute content diversification scores")
         if isinstance(video_embeddings, torch.Tensor):
@@ -202,6 +204,7 @@ def compute_empirical_diversification_scores(dataset,
         norm_v = norm_v / norms
 
         for u, vids in enumerate(allPos_video):
+            vids = list(dict.fromkeys(vids))
             n = len(vids)
             if n >= 2:
                 sum_vec = np.sum(norm_v[vids], axis=0)
@@ -415,6 +418,32 @@ def diverse_rerank(candidate_ids,
         norm_scores = np.ones_like(candidate_scores)
 
     vloggers = dataset.vlogger_list
+
+    # ─────────────────────────────────────────────────────────
+    # Baseline Method: Creator Cap (Max 2 videos per creator)
+    # ─────────────────────────────────────────────────────────
+    if method == "creator_cap":
+        max_per_creator = 2
+        selected = []
+        vlog_counts = {}
+        sorted_indices = np.argsort(-norm_scores)
+        for idx in sorted_indices:
+            vid = candidate_ids[idx]
+            vl = int(vloggers[vid])
+            if vlog_counts.get(vl, 0) < max_per_creator:
+                selected.append(vid)
+                vlog_counts[vl] = vlog_counts.get(vl, 0) + 1
+                if len(selected) == topk:
+                    break
+        # If not enough items satisfy cap, fill up from remaining
+        if len(selected) < topk:
+            for idx in sorted_indices:
+                vid = candidate_ids[idx]
+                if vid not in selected:
+                    selected.append(vid)
+                    if len(selected) == topk:
+                        break
+        return selected
 
     # ─────────────────────────────────────────────────────────────────────────
     # Method A: Empirical Score Blending (score_rerank)

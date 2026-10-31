@@ -35,7 +35,8 @@ def load_model_and_dataset(dataset_name: str, ckpt_path=None, allow_untrained: b
     model = VynoraGNN(
         n_users   = dataset.n_users,
         n_videos  = dataset.n_videos,
-        n_vloggers= dataset.n_vloggers
+        n_vloggers= dataset.n_vloggers,
+        vlogger_list = dataset.vlogger_list
     ).to(config.DEVICE)
 
     if ckpt_path is None:
@@ -52,7 +53,7 @@ def load_model_and_dataset(dataset_name: str, ckpt_path=None, allow_untrained: b
             )
     else:
         ckpt = torch.load(ckpt_path, map_location=config.DEVICE)
-        model.load_state_dict(ckpt["model_state"])
+        model.load_state_dict(ckpt["model_state"], strict=False)
         model.eval()
         print(f"Loaded checkpoint from epoch {ckpt['epoch']} "
               f"(val Recall@{config.TOPK_LIST[0]}={ckpt['val_recall']:.4f})")
@@ -113,8 +114,12 @@ def recommend_for_user(user_id: int, model: VynoraGNN, dataset: VynoraDataset,
     p_of_v = vlogger_a[vlogger_of_video]                    # [n_videos, D*(L+1)]
     s_vlog = torch.matmul(u_a, p_of_v.T).squeeze(0)        # [n_videos]
 
-    scores = (config.LAMBDA_VLOGGER * s_vid
-              + (1 - config.LAMBDA_VLOGGER) * s_vlog).cpu().numpy()
+    if getattr(config, "USE_ADAPTIVE_GATE", True):
+        w_gate = model.compute_adaptive_gate(video_v, p_of_v)
+        scores = (s_vid * w_gate + s_vlog * (1.0 - w_gate)).cpu().numpy()
+    else:
+        scores = (config.LAMBDA_VLOGGER * s_vid
+                  + (1 - config.LAMBDA_VLOGGER) * s_vlog).cpu().numpy()
 
     # Mask seen items
     if exclude_seen:

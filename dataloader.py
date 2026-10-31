@@ -13,6 +13,8 @@ Data format (same as original VA-GNN):
 import warnings
 warnings.filterwarnings("ignore", message="Sparse invariant checks are implicitly disabled")
 import os
+import math
+from collections import Counter
 import numpy as np
 import torch
 import scipy.sparse as sp
@@ -30,6 +32,7 @@ class VynoraDataset(Dataset):
     """
 
     def __init__(self, dataset_name: str = config.DATASET):
+        self.dataset_name = dataset_name
         path = os.path.join(config.DATA_ROOT, dataset_name)
         print(f"[VynoraDataset] Loading '{dataset_name}' from {path}")
 
@@ -50,16 +53,19 @@ class VynoraDataset(Dataset):
         # ── user-video interactions ─────────────────────────────────────
         (self._train_uv_users, self._train_uv_videos,
          self._val_uv,  self._test_uv,
-         self._allPos_video) = self._load_interactions(
+         self._allPos_video, self._uv_weights) = self._load_interactions(
             os.path.join(path, "user_video_data.txt"),
             self.n_users, self.n_videos
         )
         self.trainDataSize = len(self._train_uv_users)
 
+        # Deduplicated user histories (essential for non-distorted diversity targets)
+        self.dedup_train_video = [list(dict.fromkeys(v)) for v in self._allPos_video]
+
         # ── user-vlogger interactions (primary supervision) ─────────────
         (self._train_ua_users, self._train_ua_vloggers,
          self._val_ua, self._test_ua,
-         self._allPos_vlogger) = self._load_interactions(
+         self._allPos_vlogger, _) = self._load_interactions(
             os.path.join(path, "user_vlogger_data.txt"),
             self.n_users, self.n_vloggers
         )
@@ -79,6 +85,8 @@ class VynoraDataset(Dataset):
         # ── build sparse graph matrices ─────────────────────────────────
         self._graph_uv = None   # lazy build
         self._graph_ua = None
+        self._graph_homo_v = None # lazy build MPGCL VUV
+        self._graph_homo_u = None # lazy build MPGCL UVU
 
         print(f"  train U-V pairs={self.trainDataSize}  train U-A pairs={self.trainDataSize2}")
         print("[VynoraDataset] Done.\n")
@@ -115,8 +123,13 @@ class VynoraDataset(Dataset):
     def testDict(self):
         return self._test_uv
 
+    @property
+    def uvWeights(self):
+        """Returns frequency-weighted interaction dict: (u, v) -> weight."""
+        return self._uv_weights
+
     # ────────────────────────────────────────────────────────────────────
-    # Sparse adjacency (video-view and vlogger-view)
+    # Sparse adjacency (video-view, vlogger-view, and MPGCL homogeneous views)
     # ────────────────────────────────────────────────────────────────────
 
     def get_sparse_graph_uv(self):
@@ -143,6 +156,52 @@ class VynoraDataset(Dataset):
             )
         return self._graph_ua
 
+    def get_homogeneous_graph_video(self, topk=None):
+        """
+        MPGCL Video Homogeneous Graph (VUV: videos connected through common users).
+        Shape: (n_videos x n_videos)
+        """
+        if topk is None:
+            topk = getattr(config, "MPGCL_TOPK", 15)
+        if self._graph_homo_v is None:
+            os.makedirs(config.RESULT_DIR, exist_ok=True)
+            cache_path = os.path.join(config.RESULT_DIR, f"homo_vuv_{self.dataset_name}_k{topk}.npz")
+            if os.path.exists(cache_path):
+                norm_adj = sp.load_npz(cache_path)
+            else:
+                norm_adj = self._build_homogeneous_sparse(
+                    self._train_uv_users, self._train_uv_videos,
+                    self.n_users, self.n_videos, target="item", topk=topk
+                )
+                sp.save_npz(cache_path, norm_adj)
+            idx = torch.LongTensor(np.vstack([norm_adj.row, norm_adj.col]))
+            val = torch.FloatTensor(norm_adj.data)
+            self._graph_homo_v = torch.sparse_coo_tensor(idx, val, (self.n_videos, self.n_videos)).to(config.DEVICE)
+        return self._graph_homo_v
+
+    def get_homogeneous_graph_user(self, topk=None):
+        """
+        MPGCL User Homogeneous Graph (UVU: users connected through common videos).
+        Shape: (n_users x n_users)
+        """
+        if topk is None:
+            topk = getattr(config, "MPGCL_TOPK", 15)
+        if self._graph_homo_u is None:
+            os.makedirs(config.RESULT_DIR, exist_ok=True)
+            cache_path = os.path.join(config.RESULT_DIR, f"homo_uvu_{self.dataset_name}_k{topk}.npz")
+            if os.path.exists(cache_path):
+                norm_adj = sp.load_npz(cache_path)
+            else:
+                norm_adj = self._build_homogeneous_sparse(
+                    self._train_uv_users, self._train_uv_videos,
+                    self.n_users, self.n_videos, target="user", topk=topk
+                )
+                sp.save_npz(cache_path, norm_adj)
+            idx = torch.LongTensor(np.vstack([norm_adj.row, norm_adj.col]))
+            val = torch.FloatTensor(norm_adj.data)
+            self._graph_homo_u = torch.sparse_coo_tensor(idx, val, (self.n_users, self.n_users)).to(config.DEVICE)
+        return self._graph_homo_u
+
     # ────────────────────────────────────────────────────────────────────
     # Helpers
     # ────────────────────────────────────────────────────────────────────
@@ -155,11 +214,13 @@ class VynoraDataset(Dataset):
           train_users, train_items  (numpy arrays, paired)
           val_dict, test_dict       (user -> item id)
           allPos                    (user -> list of train item ids)
+          uv_weights                (dict: (user, item) -> log-frequency normalized weight)
         """
         train_users, train_items = [], []
         val_dict  = {}
         test_dict = {}
         allPos    = [[] for _ in range(n_users)]
+        uv_weights = {}
 
         with open(filepath) as f:
             for line in f:
@@ -181,14 +242,21 @@ class VynoraDataset(Dataset):
                 else:
                     train_items_u   = items
 
+                # Track frequency-weighted interactions (Sagittarius adaptation)
+                counts = Counter(train_items_u)
+                max_log = max([math.log(1.0 + c) for c in counts.values()]) if counts else 1.0
+
                 for it in train_items_u:
                     train_users.append(uid)
                     train_items.append(it)
+                    c = counts[it]
+                    uv_weights[(uid, it)] = float(math.log(1.0 + c) / max(max_log, 1e-8))
+
                 allPos[uid] = train_items_u
 
         return (np.array(train_users, dtype=np.int64),
                 np.array(train_items, dtype=np.int64),
-                val_dict, test_dict, allPos)
+                val_dict, test_dict, allPos, uv_weights)
 
     @staticmethod
     def _load_allpos_only(filepath, n_users):
@@ -205,6 +273,53 @@ class VynoraDataset(Dataset):
                 items = [int(x) for x in tokens[1:]]
                 allPos[uid] = items
         return allPos
+
+    @staticmethod
+    def _build_homogeneous_sparse(users, items, n_users, n_items, target="item", topk=15, bs=2000):
+        """
+        Builds a sparse top-k normalized homogeneous co-occurrence graph (MPGCL design).
+        Target 'item': VUV graph (n_items x n_items)
+        Target 'user': UVU graph (n_users x n_users)
+        """
+        data = np.ones(len(users), dtype=np.float32)
+        R = sp.csr_matrix((data, (users, items)), shape=(n_users, n_items))
+        if target == "item":
+            colsum = np.array(R.sum(axis=0)).flatten()
+            d = np.power(np.maximum(colsum, 1.0), -0.5)
+            R_norm = sp.diags(d) @ R.T  # (n_items, n_users)
+            N = n_items
+        else: # user
+            rowsum = np.array(R.sum(axis=1)).flatten()
+            d = np.power(np.maximum(rowsum, 1.0), -0.5)
+            R_norm = sp.diags(d) @ R    # (n_users, n_items)
+            N = n_users
+
+        all_rows, all_cols, all_vals = [], [], []
+        for i in range(0, N, bs):
+            end = min(i + bs, N)
+            batch = (R_norm[i:end] @ R_norm.T).toarray()
+            for r in range(end - i):
+                global_r = i + r
+                batch[r, global_r] = 0.0 # remove self loop
+                row_vals = batch[r]
+                nz = np.count_nonzero(row_vals)
+                if nz > 0:
+                    k_use = min(topk, nz)
+                    part = np.argpartition(-row_vals, k_use)[:k_use]
+                    part = part[row_vals[part] > 0]
+                    for c in part:
+                        all_rows.append(global_r)
+                        all_cols.append(c)
+                        all_vals.append(row_vals[c])
+
+        mat = sp.coo_matrix((all_vals, (all_rows, all_cols)), shape=(N, N)).tocsr()
+        # Degree normalization D^{-1/2} A D^{-1/2}
+        rowsum = np.array(mat.sum(axis=1)).flatten()
+        d_inv = np.power(np.maximum(rowsum, 1e-12), -0.5)
+        d_inv[np.isinf(d_inv)] = 0.0
+        D_inv = sp.diags(d_inv)
+        norm_mat = (D_inv @ mat @ D_inv).tocoo()
+        return norm_mat
 
     @staticmethod
     def _build_bipartite_sparse(users, items, n_users, n_items):

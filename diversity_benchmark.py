@@ -96,20 +96,91 @@ def run_benchmark(dataset_name: str = config.DATASET,
     print(f"[Done] Saved benchmark results to: {out_file}\n")
 
 
+def run_reranking_comparison(dataset_name: str = config.DATASET, mode: str = "val"):
+    """
+    Fair re-ranking comparison (Roadmap Phase 5) from identical Top-100 candidate pool:
+      1. Relevance-only baseline (lambda = 0.0)
+      2. Hard Creator Cap (max 2 per creator in Top-10)
+      3. MMR Publisher Diversity (lambda = 0.3)
+      4. MMR Embedding-Space Diversity (lambda = 0.3)
+      5. Hybrid MMR (lambda = 0.3)
+      6. Empirical Score Blending (lambda = 0.3)
+    """
+    print(f"\n{'='*75}")
+    print(f"  FAIR RE-RANKING COMPARISON STUDY ({dataset_name.upper()} - {mode.upper()})")
+    print(f"  Identical candidate pool: Top-100 items from Phase 1 VA-GNN backbone")
+    print(f"{'='*75}\n")
+
+    model, dataset, graph_uv, graph_ua = load_model_and_dataset(dataset_name)
+
+    methods = [
+        ("1. Pure Relevance",       0.0, "publisher", "mmr"),
+        ("2. Hard Creator Cap",      0.0, "publisher", "creator_cap"),
+        ("3. MMR Publisher Div",    0.3, "publisher", "mmr"),
+        ("4. MMR Embedding Div",    0.3, "content",   "mmr"),
+        ("5. Hybrid MMR",           0.3, "hybrid",    "mmr"),
+        ("6. Score Blending",       0.3, "publisher", "score_rerank"),
+    ]
+
+    comp_results = []
+    for label, lam, div_type, div_method in methods:
+        t0 = time.time()
+        print(f"Evaluating: {label:<28} ...", end="", flush=True)
+        res = evaluate(
+            model=model,
+            dataset=dataset,
+            graph_uv=graph_uv,
+            graph_ua=graph_ua,
+            mode=mode,
+            topk_list=[10, 20],
+            diversity_lambda=lam,
+            diversity_type=div_type,
+            diversity_method=div_method,
+            compute_diversity=True
+        )
+        elapsed = time.time() - t0
+        print(f" ({elapsed:.1f}s)")
+        row = {
+            "Method": label,
+            "Recall@10": res["Recall"].get(10, 0.0),
+            "NDCG@10": res["NDCG"].get(10, 0.0),
+            "PubDiv@10": res.get("Publisher_Diversity", {}).get(10, 0.0),
+            "EmbDiv@10": res.get("Content_Diversity", {}).get(10, 0.0),
+            "Coverage@10": res.get("Catalog_Coverage", {}).get(10, 0.0),
+        }
+        comp_results.append(row)
+
+    print(f"\n{'='*88}")
+    print(f"{'Method':<28} | {'Recall@10':>9} | {'NDCG@10':>9} | {'PubDiv@10':>9} | {'EmbDiv@10':>9} | {'Coverage@10':>11}")
+    print(f"{'-'*88}")
+    for r in comp_results:
+        print(f"{r['Method']:<28} | {r['Recall@10']:>9.4f} | {r['NDCG@10']:>9.4f} | {r['PubDiv@10']:>9.4f} | {r['EmbDiv@10']:>9.4f} | {r['Coverage@10']:>11.4f}")
+    print(f"{'='*88}\n")
+
+    out_file = os.path.join(config.RESULT_DIR, f"fair_reranking_comparison_{dataset_name}.json")
+    with open(out_file, "w") as f:
+        json.dump(comp_results, f, indent=2)
+    print(f"[Done] Saved fair comparison study to: {out_file}\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Vynora 2.0 – Paper 5 Diversity Benchmark")
     parser.add_argument("--dataset", type=str, default=config.DATASET, help="takatak | wechat")
     parser.add_argument("--mode", type=str, default="val", choices=["val", "test"])
-    parser.add_argument("--method", type=str, default="mmr", choices=["mmr", "score_rerank"])
+    parser.add_argument("--method", type=str, default="mmr", choices=["mmr", "score_rerank", "creator_cap"])
     parser.add_argument("--type", type=str, default="publisher", choices=["publisher", "content", "hybrid"])
+    parser.add_argument("--compare", action="store_true", help="Run fair re-ranking comparison study across all methods")
     args = parser.parse_args()
 
-    run_benchmark(
-        dataset_name=args.dataset,
-        mode=args.mode,
-        diversity_method=args.method,
-        diversity_type=args.type
-    )
+    if args.compare:
+        run_reranking_comparison(dataset_name=args.dataset, mode=args.mode)
+    else:
+        run_benchmark(
+            dataset_name=args.dataset,
+            mode=args.mode,
+            diversity_method=args.method,
+            diversity_type=args.type
+        )
 
 
 if __name__ == "__main__":

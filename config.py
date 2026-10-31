@@ -61,17 +61,35 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DATASET = "wechat"             # "takatak" | "wechat"
 
 # ─────────────────────────────────────────────────────────────
-# Model architecture
+# Model architecture & Research flags
 # ─────────────────────────────────────────────────────────────
 EMBED_DIM        = 64          # latent dimension for all nodes
 N_LAYERS         = 3           # number of graph propagation layers
 PROJECTION_DIM   = 64          # contrastive projection head output dim
 PROJECTION_DROP  = 0.1         # dropout inside projection head
 DENOISE_TOPK     = 10          # top-k neighbors to KEEP during denoising (0 = disabled)
-LAMBDA_VLOGGER   = 0.5         # lambda for vlogger-view score blend: s = lambda*s_vid + (1-lambda)*s_vlog
+LAMBDA_VLOGGER   = 0.5         # default/fallback weight if adaptive gate disabled
+
+# VA-GNN Bilinear Adaptive Gate (Eq. 17): w = sigmoid(e_v^T Q e_{p_v})
+USE_ADAPTIVE_GATE = True       # True = learned bilinear gate; False = fixed LAMBDA_VLOGGER
+
+# 3-Entity Cross-View Contrastive Learning (Users, Videos, Creators)
+USE_3ENTITY_CL   = True        # True = (L_u + L_v + L_p) / 3; False = user-only InfoNCE
+
+# Sagittarius Frequency Weighting: w_{uv} = log(1 + c_{uv})
+USE_FREQUENCY_WEIGHTING = True # True = frequency-weighted BPR; False = unweighted BPR
+
+# MPGCL Meta-Path Homogeneous Graphs (UVU & VUV)
+USE_MPGCL        = False       # True = add homogeneous meta-path contrastive learning
+MPGCL_TOPK       = 15          # top neighbors to retain per node in homogeneous graph
+MPGCL_DROP_RATE  = 0.1         # edge perturbation dropout rate
+MPGCL_REG        = 0.05        # weight for meta-path contrastive loss
+
+# Soft Interaction Filtering (CONDE Adaptation)
+USE_SOFT_FILTER  = False       # True = end-to-end soft relevance filtering; False = disabled
 
 # ─────────────────────────────────────────────────────────────
-# Training
+# Training & Reproducibility
 # ─────────────────────────────────────────────────────────────
 LR              = 1e-3
 WEIGHT_DECAY    = 1e-4
@@ -80,6 +98,7 @@ NEG_K           = 1            # number of negatives per positive
 EPOCHS          = 200
 PATIENCE        = 10           # early-stop patience (epochs without val improvement)
 SEED            = 42
+SEEDS           = [42, 123, 456, 789, 1024] # for 5-seed statistical verification
 
 # ─────────────────────────────────────────────────────────────
 # Loss coefficients   L = L_rank + beta*L_cl + gamma*L_den + delta*L_vlog

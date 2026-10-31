@@ -44,6 +44,9 @@ def uniform_sample(dataset: VynoraDataset, neg_k: int = config.NEG_K):
     S, S2 = [], []
 
     # ── Stream 1: user-video ──────────────────────────────────────
+    uv_weights_dict = getattr(dataset, "uvWeights", {})
+    weights = []
+
     for user in users:
         pos_videos = allPos_video[user]
         if len(pos_videos) == 0:
@@ -54,6 +57,7 @@ def uniform_sample(dataset: VynoraDataset, neg_k: int = config.NEG_K):
         pos_vlogger = vlogger_list[pos_video]
         pos_v_set   = allPos_video_sets[user]
         pos_a_set   = allPos_vlogger_sets[user]
+        w           = uv_weights_dict.get((user, pos_video), 1.0)
 
         for _ in range(neg_k):
             # sample neg_video such that it's not in pos set AND
@@ -69,6 +73,7 @@ def uniform_sample(dataset: VynoraDataset, neg_k: int = config.NEG_K):
                     neg_vlogger = neg_vlogger if neg_video not in pos_v_set else pos_vlogger
                     break
             S.append([user, pos_video, neg_video, pos_vlogger, neg_vlogger])
+            weights.append(w)
 
     # ── Stream 2: user-vlogger ────────────────────────────────────
     for user in users2:
@@ -91,7 +96,7 @@ def uniform_sample(dataset: VynoraDataset, neg_k: int = config.NEG_K):
                     break
             S2.append([user, pos_vlogger, neg_vlogger])
 
-    return np.array(S, dtype=np.int64), np.array(S2, dtype=np.int64)
+    return np.array(S, dtype=np.int64), np.array(S2, dtype=np.int64), np.array(weights, dtype=np.float32)
 
 
 def shuffle(*arrays):

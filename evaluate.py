@@ -107,8 +107,13 @@ def evaluate(model: VynoraGNN,
             u_a    = user_a[batch_tensor]
             s_vlog = torch.matmul(u_a, p_of_v.T)             # [B, n_videos]
 
-            scores = (config.LAMBDA_VLOGGER * s_vid
-                      + (1 - config.LAMBDA_VLOGGER) * s_vlog) # [B, n_videos]
+            # VA-GNN Adaptive Scoring or Fixed Lambda
+            if getattr(config, "USE_ADAPTIVE_GATE", True):
+                w_gate = model.compute_adaptive_gate(video_v, p_of_v) # [n_videos]
+                scores = s_vid * w_gate.unsqueeze(0) + s_vlog * (1.0 - w_gate.unsqueeze(0))
+            else:
+                scores = (config.LAMBDA_VLOGGER * s_vid
+                          + (1 - config.LAMBDA_VLOGGER) * s_vlog) # [B, n_videos]
 
             # Mask training positives
             for i, user in enumerate(batch_users):

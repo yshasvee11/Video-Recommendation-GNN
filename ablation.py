@@ -1,44 +1,29 @@
 """
 ablation.py  –  Vynora 2.0
-Six-variant ablation study of the Vynora RECOMMENDER model components.
-
-SCOPE CLARIFICATION:
-  This ablation studies the MAIN RECOMMENDER (VynoraGNN in model.py).
-  It is NOT an ablation of the Paper 5 DiversificationGNN predictor or
-  the diversity re-ranking module.
-
-  The six variants toggle: vlogger-view, cross-view CL, and edge pruning.
-
-Known result (from stored ablation_summary.json):
-  - Variant A (Baseline):         Recall@10 = 0.0484
-  - Variant B (+ Vlogger):        Recall@10 = 0.0471
-  - Variant F (Full model):       Recall@10 = 0.0468
-  The Full model underperforms the Baseline at current hyperparameters.
-  This result is reported transparently in results/ablation_summary.json.
-
-Variants:
-  A. Baseline           (only L_rank, no denoising, single view)
-  B. Baseline + vlogger (dual view, lambda scoring, L_vlogger)
-  C. Baseline + CL      (dual view + cross-view contrastive, no denoising)
-  D. Baseline + denoise (single view + edge pruning, no CL)
-  E. B + D              (dual view + denoising, no CL)
-  F. Full model         (dual view + CL + denoising)
+Eight-variant publication ablation matrix (M1 through M8) across research components:
+  M1. LightGCN Baseline              (pure user-video collaborative graph, no creator view)
+  M2. VA-GNN (Fixed Gate λ=0.5)      (dual view with fixed 50/50 blend, creator BPR)
+  M3. VA-GNN (Bilinear Adaptive Gate)(VA-GNN Eq 17: w = sigmoid(e_v^T Q e_{p_v}))
+  M4. VA-GNN Core (+ 3-Entity CL)    (Bilinear Gate + User/Video/Creator InfoNCE)
+  M5. VA-GNN + Sagittarius WBPR      (Log-frequency interaction weighting: w_{uv} = log(1 + c_{uv}))
+  M6. VA-GNN + MPGCL Meta-Paths      (Sparse UVU & VUV homogeneous graph contrastive regularization)
+  M7. VA-GNN + Soft Filtering        (End-to-end differentiable relevance attention)
+  M8. Full Vynora + MMR Diversity    (Core backbone + MMR publisher diversification at λ=0.3)
 """
 
 import json
 import os
 import config
 
-# We monkey-patch config before importing train to control ablation flags.
-# This is a clean approach when all hyper-params flow through config.
-
 VARIANTS = {
-    "A_baseline":          {"CL_REG": 0.0, "DENOISE_REG": 0.0, "VLOGGER_REG": 0.0, "LAMBDA_VLOGGER": 1.0},
-    "B_vlogger":           {"CL_REG": 0.0, "DENOISE_REG": 0.0, "VLOGGER_REG": 0.1,  "LAMBDA_VLOGGER": 0.5},
-    "C_contrastive":       {"CL_REG": 0.1, "DENOISE_REG": 0.0, "VLOGGER_REG": 0.1,  "LAMBDA_VLOGGER": 0.5},
-    "D_denoising":         {"CL_REG": 0.0, "DENOISE_REG": 0.05,"VLOGGER_REG": 0.0,  "LAMBDA_VLOGGER": 1.0},
-    "E_vlogger_denoise":   {"CL_REG": 0.0, "DENOISE_REG": 0.05,"VLOGGER_REG": 0.1,  "LAMBDA_VLOGGER": 0.5},
-    "F_full":              {"CL_REG": 0.1, "DENOISE_REG": 0.05,"VLOGGER_REG": 0.1,  "LAMBDA_VLOGGER": 0.5},
+    "M1_LightGCN":              {"CL_REG": 0.0, "DENOISE_REG": 0.0, "VLOGGER_REG": 0.0, "USE_ADAPTIVE_GATE": False, "LAMBDA_VLOGGER": 1.0, "USE_FREQUENCY_WEIGHTING": False, "USE_MPGCL": False},
+    "M2_VAGNN_FixedGate":       {"CL_REG": 0.0, "DENOISE_REG": 0.0, "VLOGGER_REG": 0.1, "USE_ADAPTIVE_GATE": False, "LAMBDA_VLOGGER": 0.5, "USE_FREQUENCY_WEIGHTING": False, "USE_MPGCL": False},
+    "M3_VAGNN_BilinearGate":    {"CL_REG": 0.0, "DENOISE_REG": 0.0, "VLOGGER_REG": 0.1, "USE_ADAPTIVE_GATE": True,  "USE_FREQUENCY_WEIGHTING": False, "USE_MPGCL": False},
+    "M4_VAGNN_Core_3EntityCL":  {"CL_REG": 0.1, "USE_3ENTITY_CL": True, "DENOISE_REG": 0.0, "VLOGGER_REG": 0.1, "USE_ADAPTIVE_GATE": True, "USE_FREQUENCY_WEIGHTING": False, "USE_MPGCL": False},
+    "M5_VAGNN_Sagittarius_WBPR":{"CL_REG": 0.1, "USE_3ENTITY_CL": True, "DENOISE_REG": 0.0, "VLOGGER_REG": 0.1, "USE_ADAPTIVE_GATE": True, "USE_FREQUENCY_WEIGHTING": True, "USE_MPGCL": False},
+    "M6_VAGNN_MPGCL":           {"CL_REG": 0.1, "USE_3ENTITY_CL": True, "DENOISE_REG": 0.0, "VLOGGER_REG": 0.1, "USE_ADAPTIVE_GATE": True, "USE_FREQUENCY_WEIGHTING": True, "USE_MPGCL": True},
+    "M7_VAGNN_SoftFilter":      {"CL_REG": 0.1, "USE_3ENTITY_CL": True, "DENOISE_REG": 0.05,"VLOGGER_REG": 0.1, "USE_ADAPTIVE_GATE": True, "USE_FREQUENCY_WEIGHTING": True, "USE_SOFT_FILTER": True},
+    "M8_Full_Vynora_MMR":       {"CL_REG": 0.1, "USE_3ENTITY_CL": True, "DENOISE_REG": 0.05,"VLOGGER_REG": 0.1, "USE_ADAPTIVE_GATE": True, "USE_FREQUENCY_WEIGHTING": True, "DIVERSITY_LAMBDA": 0.3},
 }
 
 

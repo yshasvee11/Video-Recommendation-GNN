@@ -68,23 +68,35 @@ class ProjectionHead(nn.Module):
 
 
 # ═══════════════════════════════════════════════════════════════
-# Edge Reliability Scorer  (CONDE-inspired)
+# Soft Interaction Filtering (CONDE-Inspired Adaptation)
+# ═══════════════════════════════════════════════════════════════
+class SoftInteractionFilter(nn.Module):
+    """
+    Differentiable soft relevance filtering (CONDE adaptation).
+    Replaces destructive discrete edge dropping with an end-to-end relevance attention:
+      r_{uv} = MLP([e_u || e_v || e_u * e_v]) -> scalar in (0, 1)
+    """
+    def __init__(self, embed_dim: int):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(embed_dim * 3, embed_dim),
+            nn.ReLU(),
+            nn.Linear(embed_dim, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, u_emb: torch.Tensor, v_emb: torch.Tensor) -> torch.Tensor:
+        cat = torch.cat([u_emb, v_emb, u_emb * v_emb], dim=-1)
+        return self.mlp(cat).squeeze(-1)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Edge Reliability Scorer  (Legacy CONDE-inspired pruning)
 # ═══════════════════════════════════════════════════════════════
 class EdgeReliabilityScorer(nn.Module):
     """
     Lightweight MLP that scores the reliability of a (user, neighbor) edge using
     their learned embeddings. Output is a scalar in [0, 1] per edge.
-
-    INSPIRATION: CONDE's edge reliability scoring concept (periodic scoring +
-    EMA accumulation + log-scale drop rule, managed by GraphDenoiser in denoiser.py).
-
-    KEY DIFFERENCE FROM CONDE:
-    - CONDE uses a TransformerEncoder over a user's full item-visit sequence and
-      performs personalized concept-aware selection.
-    - This scorer is a 2-layer MLP on concatenated (src_emb, dst_emb) pairs.
-    - It is NOT trained end-to-end through the recommendation loss. Scores are
-      computed post-forward via compute_edge_reliability_*() with torch.no_grad(),
-      so the pruning signal does not flow through the BPR gradient.
     """
     def __init__(self, embed_dim: int):
         super().__init__()
@@ -96,6 +108,7 @@ class EdgeReliabilityScorer(nn.Module):
         )
 
     def forward(self, emb_src: torch.Tensor, emb_dst: torch.Tensor) -> torch.Tensor:
+        return self.scorer(torch.cat([emb_src, emb_dst], dim=-1)).squeeze(-1)
         """
         Args:
             emb_src: [E, D] source node embeddings
@@ -142,7 +155,7 @@ class VynoraGNN(nn.Module):
       L = L_bpr_uv + beta * L_cl + gamma * L_den + delta * L_bpr_ua
     """
 
-    def __init__(self, n_users: int, n_videos: int, n_vloggers: int):
+    def __init__(self, n_users: int, n_videos: int, n_vloggers: int, vlogger_list=None):
         super().__init__()
 
         self.n_users   = n_users
@@ -164,14 +177,46 @@ class VynoraGNN(nn.Module):
         self.proj_v = ProjectionHead(concat_dim, config.PROJECTION_DIM, config.PROJECTION_DROP)
         self.proj_a = ProjectionHead(concat_dim, config.PROJECTION_DIM, config.PROJECTION_DROP)
 
-        # ── Edge reliability scorer (CONDE-inspired) ───────────────────
+        # ── VA-GNN Bilinear Adaptive Gate (Eq. 17): w = sigmoid(e_v^T Q e_{p_v}) ──
+        # Learnable bilinear parameter matrix matching the concatenated embedding dimension
+        self.gate_Q = nn.Parameter(torch.empty(concat_dim, concat_dim))
+        nn.init.xavier_uniform_(self.gate_Q.data, gain=1.0)
+
+        # ── Soft Interaction Filter (CONDE adaptation) ────────────────
+        self.soft_filter = SoftInteractionFilter(D)
+
+        # ── Legacy Edge reliability scorer (CONDE-inspired) ───────────
         self.edge_scorer_uv = EdgeReliabilityScorer(D)
         self.edge_scorer_ua = EdgeReliabilityScorer(D)
 
-        # ── Scoring lambda (FIXED — not a learned adaptive gate like VA-GNN) ────────
-        # VA-GNN learns a gate conditioned on each candidate video and its creator.
-        # Here we use a fixed config constant. Future work: learn this per-candidate.
+        # ── Fallback scoring lambda (if adaptive gate disabled in ablation) ─
         self.lambda_vlogger = config.LAMBDA_VLOGGER
+
+        # Register vlogger_list if provided
+        if vlogger_list is not None:
+            if isinstance(vlogger_list, torch.Tensor):
+                self.register_buffer("vlogger_list", vlogger_list.clone().detach().long())
+            else:
+                self.register_buffer("vlogger_list", torch.LongTensor(vlogger_list))
+        else:
+            self.vlogger_list = None
+
+    # ────────────────────────────────────────────────────────────────
+    # VA-GNN Bilinear Adaptive Gate Equation 17
+    # ────────────────────────────────────────────────────────────────
+    def compute_adaptive_gate(self, v_emb: torch.Tensor, p_emb: torch.Tensor) -> torch.Tensor:
+        """
+        VA-GNN Equation 17:
+          w = sigmoid(e_v^T Q e_{p_v})
+        Args:
+            v_emb: [*, concat_dim] video representation
+            p_emb: [*, concat_dim] creator representation
+        Returns:
+            w: [*] adaptive balance weight in (0, 1)
+        """
+        v_proj = torch.matmul(v_emb, self.gate_Q)
+        logits = (v_proj * p_emb).sum(dim=-1)
+        return torch.sigmoid(logits)
 
     # ────────────────────────────────────────────────────────────────
     # Forward – returns all embeddings needed for loss computation
@@ -185,7 +230,6 @@ class VynoraGNN(nn.Module):
         Returns dict with keys:
             user_v, video_v   : video-view final embeddings  [N, D*(L+1)]
             user_a, vlogger_a : vlogger-view final embeddings
-            user_v0, user_a0  : 0th-layer user embeddings (for contrastive)
         """
         # ── Video-view propagation ────────────────────────────────────
         e_user_v  = self.emb_user.weight
@@ -219,12 +263,14 @@ class VynoraGNN(nn.Module):
         }
 
     # ────────────────────────────────────────────────────────────────
-    # Scoring function  (VA-GNN eq.)
+    # Scoring function  (VA-GNN Bilinear Adaptive Gate)
     # ────────────────────────────────────────────────────────────────
     def score(self, users, videos, vlogger_ids,
               user_v, video_v, user_a, vlogger_a):
         """
-        s(u, v) = lambda * (u_v · v_v) + (1-lambda) * (u_a · p_a)
+        VA-GNN Bilinear Adaptive Scoring:
+          s(u, v) = w_{uv} * (u_v · v_v) + (1 - w_{uv}) * (u_a · p_a)
+          where w_{uv} = sigmoid(v_v^T Q p_a) if USE_ADAPTIVE_GATE else config.LAMBDA_VLOGGER
         """
         u_v = user_v[users]    # [B, D*(L+1)]
         v_v = video_v[videos]
@@ -233,23 +279,32 @@ class VynoraGNN(nn.Module):
 
         s_video   = (u_v * v_v).sum(dim=-1)
         s_vlogger = (u_a * p_a).sum(dim=-1)
-        return self.lambda_vlogger * s_video + (1 - self.lambda_vlogger) * s_vlogger
+
+        if getattr(config, "USE_ADAPTIVE_GATE", True):
+            w = self.compute_adaptive_gate(v_v, p_a)
+            return w * s_video + (1.0 - w) * s_vlogger
+        else:
+            return self.lambda_vlogger * s_video + (1.0 - self.lambda_vlogger) * s_vlogger
 
     # ────────────────────────────────────────────────────────────────
     # Loss functions
     # ────────────────────────────────────────────────────────────────
     def bpr_loss_uv(self, users, pos_videos, neg_videos, pos_vloggers, neg_vloggers,
-                    user_v, video_v, user_a, vlogger_a):
+                    user_v, video_v, user_a, vlogger_a, weights=None):
         """
         BPR loss for user-video recommendation (primary task).
-        Positive: (user, pos_video, vlogger_of_pos_video)
-        Negative: (user, neg_video, vlogger_of_neg_video)
+        Supports Sagittarius frequency weighting w_{uv} = log(1 + c_{uv}).
         """
         s_pos = self.score(users, pos_videos, pos_vloggers, user_v, video_v, user_a, vlogger_a)
         s_neg = self.score(users, neg_videos, neg_vloggers, user_v, video_v, user_a, vlogger_a)
-        loss  = -F.logsigmoid(s_pos - s_neg).mean()
+        diff = s_pos - s_neg
 
-        # L2 regularisation on initial embeddings only (weight_decay in optimizer)
+        if weights is not None and getattr(config, "USE_FREQUENCY_WEIGHTING", True):
+            loss = -(weights * F.logsigmoid(diff)).mean()
+        else:
+            loss = -F.logsigmoid(diff).mean()
+
+        # L2 regularisation on initial embeddings only
         reg = (self.emb_user.weight[users].norm(2).pow(2) +
                self.emb_video.weight[pos_videos].norm(2).pow(2) +
                self.emb_video.weight[neg_videos].norm(2).pow(2)) / (2 * len(users))
@@ -266,69 +321,87 @@ class VynoraGNN(nn.Module):
         s_neg = (u * na).sum(dim=-1)
         return -F.logsigmoid(s_pos - s_neg).mean()
 
-    def contrastive_loss(self, user_v, user_a, batch_users):
+    def contrastive_loss(self, user_v, user_a, batch_users,
+                         video_v=None, vlogger_a=None,
+                         batch_videos=None, batch_vloggers=None):
         """
-        Cross-view InfoNCE loss (dual-view contrast, MPGCL-inspired).
-        Aligns user representations from video-view and vlogger-view.
-        Positives: same user across the two views.
-        Negatives: all other users in the batch.
+        VA-GNN 3-Entity Cross-View Contrastive Loss:
+          L_CL = (L_user + L_video + L_creator) / 3
+        Aligns representations across video-view and vlogger-view for users,
+        videos, and creators.
+        """
+        tau = config.TEMPERATURE
 
-        NOTE: MPGCL uses meta-path-derived homogeneous graphs as the two views
-        (e.g., User-Video-User and User-Vlogger-User meta-path adjacencies).
-        Here we contrast the two DIRECT interaction views (User-Video bipartite
-        vs User-Vlogger bipartite). This is simpler but structurally analogous.
-        """
+        # 1. User contrast
         z_v = F.normalize(self.proj_v(user_v[batch_users]), dim=-1)   # [B, proj_dim]
         z_a = F.normalize(self.proj_a(user_a[batch_users]), dim=-1)   # [B, proj_dim]
 
-        tau  = config.TEMPERATURE
-        # Compute similarity matrix [B, B]
-        sim  = torch.matmul(z_v, z_a.T) / tau
-        # Symmetric InfoNCE
-        B    = sim.size(0)
-        labels = torch.arange(B, device=sim.device)
-        loss_v = F.cross_entropy(sim,   labels)
-        loss_a = F.cross_entropy(sim.T, labels)
-        return (loss_v + loss_a) / 2
+        sim_u  = torch.matmul(z_v, z_a.T) / tau
+        labels = torch.arange(len(batch_users), device=sim_u.device)
+        loss_u = (F.cross_entropy(sim_u, labels) + F.cross_entropy(sim_u.T, labels)) / 2.0
+
+        if not getattr(config, "USE_3ENTITY_CL", True) or video_v is None or batch_videos is None:
+            return loss_u
+
+        # 2. Video contrast (align candidate video with creator representation)
+        u_vids = torch.unique(batch_videos)
+        if len(u_vids) > 1 and self.vlogger_list is not None:
+            v_creators = self.vlogger_list[u_vids]
+            z_vid_v = F.normalize(self.proj_v(video_v[u_vids]), dim=-1)
+            z_vid_a = F.normalize(self.proj_a(vlogger_a[v_creators]), dim=-1)
+            sim_v = torch.matmul(z_vid_v, z_vid_a.T) / tau
+            lbl_v = torch.arange(len(u_vids), device=sim_v.device)
+            loss_v = (F.cross_entropy(sim_v, lbl_v) + F.cross_entropy(sim_v.T, lbl_v)) / 2.0
+        else:
+            loss_v = loss_u
+
+        # 3. Creator contrast
+        if batch_vloggers is not None:
+            u_vlogs = torch.unique(batch_vloggers)
+            if len(u_vlogs) > 1:
+                z_crt_a = F.normalize(self.proj_a(vlogger_a[u_vlogs]), dim=-1)
+                z_crt_v = F.normalize(self.proj_v(vlogger_a[u_vlogs]), dim=-1)
+                sim_p = torch.matmul(z_crt_a, z_crt_v.T) / tau
+                lbl_p = torch.arange(len(u_vlogs), device=sim_p.device)
+                loss_p = (F.cross_entropy(sim_p, lbl_p) + F.cross_entropy(sim_p.T, lbl_p)) / 2.0
+            else:
+                loss_p = loss_u
+        else:
+            loss_p = loss_u
+
+        return (loss_u + loss_v + loss_p) / 3.0
 
     def denoising_consistency_loss(self, user_v, user_a, batch_users):
         """
-        Auxiliary denoising loss: the two views of the SAME user should
-        remain close even after edge removal. We use MSE on L2-normalised
-        embeddings as a soft consistency regulariser (gamma * L_den).
+        Auxiliary denoising consistency loss.
         """
         z_v = F.normalize(user_v[batch_users], dim=-1)
         z_a = F.normalize(user_a[batch_users], dim=-1)
         return F.mse_loss(z_v, z_a)
 
     # ────────────────────────────────────────────────────────────────
-    # Edge reliability scoring  (CONDE denoising interface)
+    # Edge reliability scoring  (Legacy CONDE denoising interface)
     # ────────────────────────────────────────────────────────────────
     @torch.no_grad()
     def compute_edge_reliability_uv(self, src_users, dst_videos):
-        """
-        Score user-video edges using the current embedding state.
-        Called externally after each epoch; scores are accumulated by trainer.
-        Returns: [E] tensor of reliability scores in [0,1].
-        """
         eu = self.emb_user.weight[src_users]
         ev = self.emb_video.weight[dst_videos]
         return self.edge_scorer_uv(eu, ev)
 
     @torch.no_grad()
     def compute_edge_reliability_ua(self, src_users, dst_vloggers):
-        """Score user-vlogger edges."""
         eu = self.emb_user.weight[src_users]
         ea = self.emb_vlogger.weight[dst_vloggers]
         return self.edge_scorer_ua(eu, ea)
 
     # ────────────────────────────────────────────────────────────────
-    # getUsersRating – vectorised scoring for evaluation
+    # getUsersRating – vectorised scoring with Bilinear Adaptive Gate
     # ────────────────────────────────────────────────────────────────
     @torch.no_grad()
-    def getUsersRating(self, users, graph_uv, graph_ua):
+    def getUsersRating(self, users, graph_uv, graph_ua, vlogger_list=None):
         """
         Returns a [|users|, n_videos] score matrix for evaluation.
+        Uses exact VA-GNN Bilinear Adaptive Gate when enabled.
         """
         emb = self.forward(graph_uv, graph_ua)
         u_v = emb["user_v"][users]          # [B, D*(L+1)]
@@ -336,13 +409,19 @@ class VynoraGNN(nn.Module):
         u_a = emb["user_a"][users]          # [B, D*(L+1)]
         p_a = emb["vlogger_a"]              # [n_vloggers, D*(L+1)]
 
-        # Expand vlogger embeddings indexed by video
-        s_video   = torch.matmul(u_v, v_v.T)   # [B, n_videos]
+        s_video = torch.matmul(u_v, v_v.T)  # [B, n_videos]
 
-        # For every video, its vlogger's embedding  [n_videos, D*(L+1)]
-        # (efficient: avoid loop by matrix multiply then index)
-        # s_vlogger[b,v] = u_a[b] · p_a[vlogger_of_v]
-        # Build per-video vlogger embedding matrix
-        #   This is pre-computed once and cached in the trainer.
-        # Here we return s_video only if vlogger_of_video tensor not passed.
-        return s_video    # caller adds vlogger score if needed
+        vl = vlogger_list if vlogger_list is not None else self.vlogger_list
+        if vl is not None:
+            if not isinstance(vl, torch.Tensor):
+                vl = torch.LongTensor(vl).to(config.DEVICE)
+            p_of_v = p_a[vl]                # [n_videos, D*(L+1)]
+            s_vlogger = torch.matmul(u_a, p_of_v.T) # [B, n_videos]
+
+            if getattr(config, "USE_ADAPTIVE_GATE", True):
+                w = self.compute_adaptive_gate(v_v, p_of_v) # [n_videos]
+                return s_video * w.unsqueeze(0) + s_vlogger * (1.0 - w.unsqueeze(0))
+            else:
+                return config.LAMBDA_VLOGGER * s_video + (1.0 - config.LAMBDA_VLOGGER) * s_vlogger
+
+        return s_video
