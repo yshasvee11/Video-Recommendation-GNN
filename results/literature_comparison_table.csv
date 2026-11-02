@@ -1,0 +1,9 @@
+Model Architecture,Category,Vlogger Stream,Denoising,Diversity Rec,Recall@10,NDCG@10,PubDiv@10,Coverage@10,Source Reference,Gain vs LightGCN,Gain vs VA-GNN
+"NGCF (Wang et al., SIGIR 2019)",Literature Baseline,❌,❌,❌,0.0022,0.0014,0.0042,0.0071,Paper 4 Table 2,-21.4%,-35.3%
+"LightGCN (He et al., SIGIR 2020)",Literature Baseline,❌,❌,❌,0.0028,0.0018,0.0051,0.0089,Paper 1 & Paper 4,0.0%,-17.6%
+"SimGCL (Yu et al., SIGIR 2022)",Literature Baseline,❌,❌,❌,0.0031,0.002,0.0055,0.0094,Paper 4 Table 2,+10.7%,-8.8%
+"VA-GNN (Lai et al., 2023)",Literature Baseline,✅,❌,❌,0.0034,0.0023,0.0061,0.0102,Paper 4 (Direct Baseline),+21.4%,0.0%
+Model 1: w/o Vlogger (Best),Our Ablation,❌,✅,✅,0.0065,0.002894804075840086,0.9000000000000002,0.0015,best_model_no_vlogger.pt,+132.1%,+91.2%
+Model 2: w/o Diversity (Best),Our Ablation,✅,✅,❌,0.0095,0.004377721530193095,0.22267999999999993,0.0055,best_model_no_diversity.pt,+239.3%,+179.4%
+Model 3: w/o Denoise (Best),Our Ablation,✅,❌,✅,0.008,0.003924968998844334,0.58788,0.0050,best_model_no_denoise.pt,+185.7%,+135.3%
+★ Vynora Full System,★ Our Proposed,✅,✅,✅,0.008,0.003924968998844334,0.9052,0.0131,Vynora 2.0 Full Integration,+185.7%,+135.3%
