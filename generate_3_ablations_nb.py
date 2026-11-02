@@ -1,22 +1,19 @@
 """
 generate_3_ablations_nb.py
-Generates the comprehensive, rigorous Google Colab notebook for the 3-way ablation study:
+Generates the comprehensive, rigorous Google Colab notebook for the 4-model ablation & full system study:
 vynora_3_ablations_colab.ipynb
 
-Specifications:
-- 40 Full Epochs per variant (EPOCHS=40, PATIENCE=40)
-- Saves TWO checkpoints per variant (Best validation checkpoint + Last epoch 40 checkpoint)
-  Total 6 .pt files:
-  1. best_model_no_vlogger.pt & last_model_no_vlogger.pt
-  2. best_model_no_diversity.pt & last_model_no_diversity.pt
-  3. best_model_no_denoise.pt & last_model_no_denoise.pt
-- Identical evaluation methodology to Paper 4 (VA-GNN) and Paper 5 (Diversity):
-  * Full catalog scoring with train item masking
-  * Leave-one-out test split
-  * Recall@10, Recall@20, NDCG@10, NDCG@20 matching VAGNN/code/utils.py
-  * Publisher Diversity@10 (1 - HHI) and Catalog Coverage@10
-- Literature baseline comparison table against NGCF, LightGCN, SimGCL, and VA-GNN
-- 1-click browser download of all 6 .pt files and presentation tables
+Models trained & saved:
+1. Model 1: w/o Vlogger Node (Denoising=ON, Diversity=ON)
+   -> Saves: best_model_no_vlogger.pt & last_model_no_vlogger.pt
+2. Model 2: w/o Diversity Rec (Vlogger=ON, Denoising=ON)
+   -> Saves: best_model_no_diversity.pt & last_model_no_diversity.pt
+3. Model 3: w/o Graph Denoising (Vlogger=ON, Diversity=ON)
+   -> Saves: best_model_no_denoise.pt & last_model_no_denoise.pt
+4. Model 4: Full Proposed Vynora (All 3 Enabled: Vlogger=ON, Denoising=ON, Diversity=ON)
+   -> Saves: best_model_full_vynora.pt & last_model_full_vynora.pt
+
+Total: 8 .pt checkpoint files + presentation tables (CSV & Markdown).
 """
 
 import json
@@ -37,21 +34,20 @@ def build_notebook():
             "cell_type": "markdown",
             "metadata": {},
             "source": [
-                "# 🔬 Vynora — 40-Epoch 3-Way Ablation Suite & Research Benchmark\n",
-                "### Systematic Component Isolation with Dual Checkpoints (Best + Last Epoch) & Literature Baseline Comparison\n",
+                "# 🔬 Vynora — 40-Epoch Complete Ablation & Full System Suite\n",
+                "### Systematic Component Isolation + Full Architecture Benchmark with Dual Checkpoints (Best + Last)\n",
                 "[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yshasvee11/Video-Recommendation-GNN/blob/main/vynora_3_ablations_colab.ipynb)\n",
                 "\n",
-                "This self-contained Google Colab notebook conducts a **rigorous 40-epoch ablation study** on micro-video recommendation:\n",
+                "This self-contained Google Colab notebook conducts a **complete 40-epoch empirical study** on micro-video recommendation across **4 distinct models**:\n",
                 "\n",
-                "### 🎯 The 3 Ablation Models Trained (40 Full Epochs each):\n",
-                "1. **Model 1: w/o Vlogger Node** (Graph Denoising = ON, Diversity Rec = ON)\n",
-                "   - Saves `best_model_no_vlogger.pt` & `last_model_no_vlogger.pt`\n",
-                "2. **Model 2: w/o Diversity Rec** (Vlogger Node = ON, Graph Denoising = ON)\n",
-                "   - Saves `best_model_no_diversity.pt` & `last_model_no_diversity.pt`\n",
-                "3. **Model 3: w/o Graph Denoising** (Vlogger Node = ON, Diversity Rec = ON)\n",
-                "   - Saves `best_model_no_denoise.pt` & `last_model_no_denoise.pt`\n",
+                "| Model # | Model Variant | Vlogger Node | Graph Denoising | Diversity Rec | Checkpoints Saved (Best & Last) |\n",
+                "|:---:|:---|:---:|:---:|:---:|:---|\n",
+                "| **1** | **w/o Vlogger Node** | ❌ OFF | ✅ ON | ✅ ON | `best_model_no_vlogger.pt` & `last_model_no_vlogger.pt` |\n",
+                "| **2** | **w/o Diversity Rec** | ✅ ON | ✅ ON | ❌ OFF | `best_model_no_diversity.pt` & `last_model_no_diversity.pt` |\n",
+                "| **3** | **w/o Graph Denoising** | ✅ ON | ❌ OFF | ✅ ON | `best_model_no_denoise.pt` & `last_model_no_denoise.pt` |\n",
+                "| **4** | **★ Full Vynora (All 3 ON)** | ✅ ON | ✅ ON | ✅ ON | `best_model_full_vynora.pt` & `last_model_full_vynora.pt` |\n",
                 "\n",
-                "### 📊 Identical Research Paper Evaluation Protocol:\n",
+                "### 📊 Research Paper Evaluation Protocol:\n",
                 "- Uses the **exact same Leave-One-Out split** and **full-catalog ranking evaluation** as Paper 4 (VA-GNN, Lai et al.) and Paper 5 (Chun et al., ESWA 2024).\n",
                 "- Evaluates **Recall@10, Recall@20, NDCG@10, NDCG@20, Publisher Diversity@10, and Catalog Coverage@10**.\n",
                 "- Compares directly with published baselines (**NGCF, LightGCN, SimGCL, VA-GNN**) in a professor-ready comparison table.\n",
@@ -91,7 +87,6 @@ def build_notebook():
             "outputs": [],
             "source": [
                 "# 2. Acquire Dataset Directly from GitHub Repository\n",
-                "# Colab runs in the cloud; this downloads the exact WeChat and TakaTak data files\n",
                 "import os\n",
                 "if not os.path.exists('data/wechat/user_video_data.txt') and not os.path.exists('data/takatak/user_video_data.txt'):\n",
                 "    print('Cloning repository dataset from GitHub...')\n",
@@ -167,13 +162,6 @@ def build_notebook():
                 "from collections import defaultdict, Counter\n",
                 "\n",
                 "class VynoraDataset:\n",
-                "    \"\"\"\n",
-                "    Loads the tripartite micro-video interaction dataset.\n",
-                "    Adheres strictly to the Leave-One-Out protocol used in VA-GNN (Lai et al.):\n",
-                "      - User's last interaction: Held out for Test\n",
-                "      - User's second-to-last interaction: Held out for Validation\n",
-                "      - All preceding interactions: Form the training interaction graph\n",
-                "    \"\"\"\n",
                 "    def __init__(self, dataset_name='wechat', data_dir='data'):\n",
                 "        self.dataset_name = dataset_name\n",
                 "        self.base_dir = os.path.join(data_dir, dataset_name)\n",
@@ -286,10 +274,6 @@ def build_notebook():
             "source": [
                 "# 5. CONDE Graph Denoiser (Paper 2 Adaptation)\n",
                 "class GraphDenoiser:\n",
-                "    \"\"\"\n",
-                "    Computes edge reliability between nodes and periodically prunes\n",
-                "    noisy or spurious edges from the user-item interaction graph.\n",
-                "    \"\"\"\n",
                 "    def __init__(self, u_list, i_list, n_u, n_i, drop_rate=0.05):\n",
                 "        self.u_list = np.array(u_list, dtype=np.int64)\n",
                 "        self.i_list = np.array(i_list, dtype=np.int64)\n",
@@ -508,7 +492,6 @@ def build_notebook():
                 "                creator_scores = torch.matmul(u_a[u_t], a_a[vlog_tensor].T)\n",
                 "                scores_chunk = 0.5 * scores_chunk + 0.5 * creator_scores\n",
                 "                \n",
-                "            # Mask training items to prevent cheating\n",
                 "            for i, u in enumerate(u_chunk):\n",
                 "                train_vids = dataset.user_pos_train.get(u, [])\n",
                 "                if train_vids:\n",
@@ -543,7 +526,7 @@ def build_notebook():
                 "                else:\n",
                 "                    ranked_vids = pool_top100[:20]\n",
                 "                    \n",
-                "                # Metric 1: Recall@10 & NDCG@10 (Formula matching VAGNN/code/utils.py)\n",
+                "                # Metric 1: Recall@10 & NDCG@10\n",
                 "                top10 = list(ranked_vids[:10])\n",
                 "                all_recommended_videos10.update(top10)\n",
                 "                hit10 = 1.0 if target in top10 else 0.0\n",
@@ -576,7 +559,7 @@ def build_notebook():
                 "print('✓ Evaluation metrics verified against literature')"
             ]
         },
-        # Cell 9: Universal 40-Epoch Trainer (Dual Checkpoints: Best + Last)
+        # Cell 9: Universal 40-Epoch Trainer Engine (Dual Checkpoints: Best + Last)
         {
             "cell_type": "code",
             "execution_count": None,
@@ -587,13 +570,13 @@ def build_notebook():
                 "import time\n",
                 "\n",
                 "def train_ablation_model(variant_id, variant_name, use_vlogger, use_denoising, use_diversity, best_ckpt_file, last_ckpt_file):\n",
-                "    print(f'\\n{\"=\"*80}')\n",
+                "    print(f'\\n{\"=\"*85}')\n",
                 "    print(f'🚀 Training Variant: {variant_name}')\n",
                 "    print(f'   Target Schedule  : {cfg.EPOCHS} Full Epochs')\n",
                 "    print(f'   Component Flags  : Vlogger Node={use_vlogger} | Denoising={use_denoising} | Diversity Rec={use_diversity}')\n",
                 "    print(f'   Best Checkpoint  : {best_ckpt_file}')\n",
                 "    print(f'   Last Checkpoint  : {last_ckpt_file}')\n",
-                "    print(f'{\"=\"*80}')\n",
+                "    print(f'{\"=\"*85}')\n",
                 "    \n",
                 "    model = VynoraAblationGNN(\n",
                 "        n_users=dataset.n_users,\n",
@@ -747,7 +730,6 @@ def build_notebook():
             "outputs": [],
             "source": [
                 "# 10. Train Model 1: Without Vlogger Node (Denoising=ON, Diversity=ON)\n",
-                "# Saves both best and last epoch checkpoints (40 epochs)\n",
                 "res_model1 = train_ablation_model(\n",
                 "    variant_id='no_vlogger',\n",
                 "    variant_name='Model 1: w/o Vlogger Node (Denoising=ON, Diversity=ON)',\n",
@@ -767,7 +749,6 @@ def build_notebook():
             "outputs": [],
             "source": [
                 "# 11. Train Model 2: Without Diversity Rec (Vlogger Node=ON, Denoising=ON)\n",
-                "# Saves both best and last epoch checkpoints (40 epochs)\n",
                 "res_model2 = train_ablation_model(\n",
                 "    variant_id='no_diversity',\n",
                 "    variant_name='Model 2: w/o Diversity Rec (Vlogger=ON, Denoising=ON)',\n",
@@ -787,7 +768,6 @@ def build_notebook():
             "outputs": [],
             "source": [
                 "# 12. Train Model 3: Without Graph Denoising (Vlogger Node=ON, Diversity=ON)\n",
-                "# Saves both best and last epoch checkpoints (40 epochs)\n",
                 "res_model3 = train_ablation_model(\n",
                 "    variant_id='no_denoising',\n",
                 "    variant_name='Model 3: w/o Graph Denoising (Vlogger=ON, Diversity=ON)',\n",
@@ -799,21 +779,40 @@ def build_notebook():
                 ")"
             ]
         },
-        # Cell 13: Literature Comparison & Professor Presentation Table
+        # Cell 13: Train Model 4 (Full Proposed System: All 3 Enabled)
         {
             "cell_type": "code",
             "execution_count": None,
             "metadata": {},
             "outputs": [],
             "source": [
-                "# 13. Comprehensive Benchmark & Professor Presentation Table\n",
-                "# Compares published baselines from Paper 4 (Table 2) with your 3 ablation variants\n",
+                "# 13. Train Model 4: Full Vynora System (All 3 Enabled: Vlogger=ON, Denoising=ON, Diversity=ON)\n",
+                "# Trains the complete integrated architecture where all modules work together\n",
+                "res_model4 = train_ablation_model(\n",
+                "    variant_id='full_vynora',\n",
+                "    variant_name='Model 4: ★ Full Vynora (All 3 ON: Vlogger=ON, Denoising=ON, Diversity=ON)',\n",
+                "    use_vlogger=True,         # Vlogger Node ENABLED\n",
+                "    use_denoising=True,       # Graph Denoising ENABLED\n",
+                "    use_diversity=True,       # Diversity Recommendation ENABLED\n",
+                "    best_ckpt_file='best_model_full_vynora.pt',\n",
+                "    last_ckpt_file='last_model_full_vynora.pt'\n",
+                ")"
+            ]
+        },
+        # Cell 14: Literature Comparison & Professor Presentation Table
+        {
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# 14. Comprehensive Benchmark & Professor Presentation Table\n",
+                "# Compares published baselines from Paper 4 (Table 2) with all 4 trained models\n",
                 "import pandas as pd\n",
                 "from IPython.display import display, HTML\n",
                 "\n",
-                "# Published literature baselines on WeChat-Channels under exact Leave-One-Out protocol\n",
                 "rows = [\n",
-                "    # --- Literature Reference Models ---\n",
+                "    # --- Literature Reference Models (Paper 4 Table 2) ---\n",
                 "    {\n",
                 "        'Model Architecture': 'NGCF (Wang et al., SIGIR 2019)',\n",
                 "        'Category': 'Literature Baseline',\n",
@@ -824,7 +823,7 @@ def build_notebook():
                 "        'NDCG@10': 0.0014,\n",
                 "        'PubDiv@10': 0.0042,\n",
                 "        'Coverage@10': '0.0071',\n",
-                "        'Source Reference': 'Paper 4 Table 2'\n",
+                "        'Checkpoint Source': 'Paper 4 Table 2'\n",
                 "    },\n",
                 "    {\n",
                 "        'Model Architecture': 'LightGCN (He et al., SIGIR 2020)',\n",
@@ -836,7 +835,7 @@ def build_notebook():
                 "        'NDCG@10': 0.0018,\n",
                 "        'PubDiv@10': 0.0051,\n",
                 "        'Coverage@10': '0.0089',\n",
-                "        'Source Reference': 'Paper 1 & Paper 4'\n",
+                "        'Checkpoint Source': 'Paper 1 & Paper 4'\n",
                 "    },\n",
                 "    {\n",
                 "        'Model Architecture': 'SimGCL (Yu et al., SIGIR 2022)',\n",
@@ -848,7 +847,7 @@ def build_notebook():
                 "        'NDCG@10': 0.0020,\n",
                 "        'PubDiv@10': 0.0055,\n",
                 "        'Coverage@10': '0.0094',\n",
-                "        'Source Reference': 'Paper 4 Table 2'\n",
+                "        'Checkpoint Source': 'Paper 4 Table 2'\n",
                 "    },\n",
                 "    {\n",
                 "        'Model Architecture': 'VA-GNN (Lai et al., 2023)',\n",
@@ -860,9 +859,9 @@ def build_notebook():
                 "        'NDCG@10': 0.0023,\n",
                 "        'PubDiv@10': 0.0061,\n",
                 "        'Coverage@10': '0.0102',\n",
-                "        'Source Reference': 'Paper 4 (Direct Baseline)'\n",
+                "        'Checkpoint Source': 'Paper 4 (Direct Baseline)'\n",
                 "    },\n",
-                "    # --- Your Trained Ablation Models ---\n",
+                "    # --- Your 3 Component Ablation Models ---\n",
                 "    {\n",
                 "        'Model Architecture': 'Model 1: w/o Vlogger (Best)',\n",
                 "        'Category': 'Our Ablation',\n",
@@ -873,7 +872,7 @@ def build_notebook():
                 "        'NDCG@10': res_model1['best_test_results']['ndcg10'],\n",
                 "        'PubDiv@10': res_model1['best_test_results']['pub_div10'],\n",
                 "        'Coverage@10': f\"{res_model1['best_test_results']['coverage10']:.4f}\",\n",
-                "        'Source Reference': 'best_model_no_vlogger.pt'\n",
+                "        'Checkpoint Source': res_model1['best_ckpt_file']\n",
                 "    },\n",
                 "    {\n",
                 "        'Model Architecture': 'Model 2: w/o Diversity (Best)',\n",
@@ -885,7 +884,7 @@ def build_notebook():
                 "        'NDCG@10': res_model2['best_test_results']['ndcg10'],\n",
                 "        'PubDiv@10': res_model2['best_test_results']['pub_div10'],\n",
                 "        'Coverage@10': f\"{res_model2['best_test_results']['coverage10']:.4f}\",\n",
-                "        'Source Reference': 'best_model_no_diversity.pt'\n",
+                "        'Checkpoint Source': res_model2['best_ckpt_file']\n",
                 "    },\n",
                 "    {\n",
                 "        'Model Architecture': 'Model 3: w/o Denoise (Best)',\n",
@@ -897,35 +896,35 @@ def build_notebook():
                 "        'NDCG@10': res_model3['best_test_results']['ndcg10'],\n",
                 "        'PubDiv@10': res_model3['best_test_results']['pub_div10'],\n",
                 "        'Coverage@10': f\"{res_model3['best_test_results']['coverage10']:.4f}\",\n",
-                "        'Source Reference': 'best_model_no_denoise.pt'\n",
+                "        'Checkpoint Source': res_model3['best_ckpt_file']\n",
                 "    },\n",
-                "    # --- Full Proposed Vynora System ---\n",
+                "    # --- Full Integrated System (All 3 Working Together) ---\n",
                 "    {\n",
-                "        'Model Architecture': '★ Vynora Full System',\n",
+                "        'Model Architecture': '★ Model 4: Full Vynora (All 3 ON)',\n",
                 "        'Category': '★ Our Proposed',\n",
                 "        'Vlogger Stream': '✅',\n",
                 "        'Denoising': '✅',\n",
                 "        'Diversity Rec': '✅',\n",
-                "        'Recall@10': max(res_model1['best_test_results']['recall10'], res_model3['best_test_results']['recall10'], 0.0073),\n",
-                "        'NDCG@10': max(res_model1['best_test_results']['ndcg10'], res_model3['best_test_results']['ndcg10'], 0.0038),\n",
-                "        'PubDiv@10': 0.9052,\n",
-                "        'Coverage@10': '0.0131',\n",
-                "        'Source Reference': 'Vynora 2.0 Full Integration'\n",
+                "        'Recall@10': res_model4['best_test_results']['recall10'],\n",
+                "        'NDCG@10': res_model4['best_test_results']['ndcg10'],\n",
+                "        'PubDiv@10': res_model4['best_test_results']['pub_div10'],\n",
+                "        'Coverage@10': f\"{res_model4['best_test_results']['coverage10']:.4f}\",\n",
+                "        'Checkpoint Source': res_model4['best_ckpt_file']\n",
                 "    }\n",
                 "]\n",
                 "\n",
                 "df_bench = pd.DataFrame(rows)\n",
                 "\n",
-                "# Calculate Relative Improvements (%)\n",
+                "# Calculate Relative Gains vs LightGCN and VA-GNN\n",
                 "base_lightgcn_rec = 0.0028\n",
                 "base_vagnn_rec = 0.0034\n",
                 "\n",
                 "df_bench['Gain vs LightGCN'] = df_bench['Recall@10'].apply(lambda r: f\"+{(r - base_lightgcn_rec)/base_lightgcn_rec * 100:+.1f}%\")\n",
                 "df_bench['Gain vs VA-GNN'] = df_bench['Recall@10'].apply(lambda r: f\"+{(r - base_vagnn_rec)/base_vagnn_rec * 100:+.1f}%\")\n",
                 "\n",
-                "print('\\n' + '='*120)\n",
+                "print('\\n' + '='*125)\n",
                 "print('                   VYNORA vs. LITERATURE RESEARCH PAPERS BENCHMARK')\n",
-                "print('='*120)\n",
+                "print('='*125)\n",
                 "display(df_bench)\n",
                 "\n",
                 "# Export tables\n",
@@ -936,14 +935,14 @@ def build_notebook():
                 "print('\\n✓ Presentation table saved to literature_comparison_table.csv and literature_comparison_table.md')"
             ]
         },
-        # Cell 14: Automated Browser Download of all 6 Checkpoints & Tables
+        # Cell 15: Download Checkpoints
         {
             "cell_type": "code",
             "execution_count": None,
             "metadata": {},
             "outputs": [],
             "source": [
-                "# 14. 1-Click Browser Download for All 6 Checkpoints, CSV, and Benchmark Tables\n",
+                "# 15. 1-Click Browser Download for All 8 Checkpoints, CSV, and Benchmark Tables\n",
                 "from google.colab import files\n",
                 "\n",
                 "files_to_download = [\n",
@@ -956,12 +955,15 @@ def build_notebook():
                 "    # Model 3 Checkpoints\n",
                 "    'best_model_no_denoise.pt',\n",
                 "    'last_model_no_denoise.pt',\n",
+                "    # Model 4 (Full Proposed System) Checkpoints\n",
+                "    'best_model_full_vynora.pt',\n",
+                "    'last_model_full_vynora.pt',\n",
                 "    # Presentation Benchmarks\n",
                 "    'literature_comparison_table.csv',\n",
                 "    'literature_comparison_table.md'\n",
                 "]\n",
                 "\n",
-                "print('Triggering browser download for all 6 ablation .pt checkpoints and presentation tables...')\n",
+                "print('Triggering browser download for all 8 checkpoint files and presentation tables...')\n",
                 "for f_name in files_to_download:\n",
                 "    if os.path.exists(f_name):\n",
                 "        try:\n",
@@ -972,7 +974,7 @@ def build_notebook():
                 "    else:\n",
                 "        print(f'  ✗ File {f_name} not found.')\n",
                 "\n",
-                "print('\\n🎉 All 40-epoch ablation runs completed successfully!')"
+                "print('\\n🎉 All 4 models trained and evaluated successfully!')"
             ]
         }
     ]
