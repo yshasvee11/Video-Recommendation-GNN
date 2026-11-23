@@ -1,0 +1,84 @@
+{
+  "takatak": {
+    "protocol_a_full_catalog": {
+      "Recall@10": 0.019,
+      "Recall@20": 0.035,
+      "NDCG@10": 0.009330548099289878,
+      "NDCG@20": 0.013303072862994625,
+      "Precision@10": 0.0019,
+      "MRR@10": 0.007477586096394147,
+      "Publisher_Diversity@10": 0.9598444444444445,
+      "Users": 1000
+    },
+    "protocol_b_100neg": {
+      "Recall@10": 0.41,
+      "Recall@20": 0.515,
+      "NDCG@10": 0.24740185337265388,
+      "NDCG@20": 0.27404395967126954,
+      "Precision@10": 0.041,
+      "AUC": 0.706,
+      "Users": 1000
+    },
+    "protocol_c_diversity": {
+      "0.0": {
+        "Recall@10": 0.01,
+        "NDCG@10": 0.003729401591662075,
+        "Publisher_Diversity@10": 0.962,
+        "Catalog_Coverage@10": 0.08208330160663976
+      },
+      "0.3": {
+        "Recall@10": 0.012,
+        "NDCG@10": 0.00464418001271685,
+        "Publisher_Diversity@10": 0.9978222222222223,
+        "Catalog_Coverage@10": 0.08322546257519227
+      },
+      "0.5": {
+        "Recall@10": 0.012,
+        "NDCG@10": 0.00464418001271685,
+        "Publisher_Diversity@10": 1.0,
+        "Catalog_Coverage@10": 0.0826924541232011
+      }
+    }
+  },
+  "wechat": {
+    "protocol_a_full_catalog": {
+      "Recall@10": 0.005,
+      "Recall@20": 0.007,
+      "NDCG@10": 0.00406160631164485,
+      "NDCG@20": 0.00453682769157962,
+      "Precision@10": 0.0005,
+      "MRR@10": 0.00386437908496732,
+      "Publisher_Diversity@10": 0.011755555555555554,
+      "Users": 1000
+    },
+    "protocol_b_100neg": {
+      "Recall@10": 0.328,
+      "Recall@20": 0.526,
+      "NDCG@10": 0.1595245102368861,
+      "NDCG@20": 0.209443076178754,
+      "Precision@10": 0.032799999999999996,
+      "AUC": 0.74313,
+      "Users": 1000
+    },
+    "protocol_c_diversity": {
+      "0.0": {
+        "Recall@10": 0.002,
+        "NDCG@10": 0.0012618595071429148,
+        "Publisher_Diversity@10": 0.011333333333333332,
+        "Catalog_Coverage@10": 0.004542654758238374
+      },
+      "0.3": {
+        "Recall@10": 0.002,
+        "NDCG@10": 0.0012618595071429148,
+        "Publisher_Diversity@10": 0.043511111111111105,
+        "Catalog_Coverage@10": 0.004427163535571297
+      },
+      "0.5": {
+        "Recall@10": 0.004,
+        "NDCG@10": 0.002123212623289701,
+        "Publisher_Diversity@10": 0.3107111111111111,
+        "Catalog_Coverage@10": 0.004196181090237142
+      }
+    }
+  }
+}
