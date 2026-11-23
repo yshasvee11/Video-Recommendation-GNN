@@ -1,19 +1,19 @@
 """
-predict.py – Interactive Terminal Recommendation & Genre Diversity Script for Paper 3 (MovieLens-1M).
+predict.py – Clean & Minimal Recommendation Predictor for Paper 3 (MovieLens-1M).
 Usage:
-    python paper-3/predict.py --user 42 --lambda_div 0.3 --topk 10
-    python paper-3/predict.py --user 123 --lambda_div 0.7
+    python paper-3/predict.py --user 42 --lambda_div 0.3
+    python paper-3/predict.py --user 123 --lambda_div 0.0
 """
 
 import os
 import sys
+import io
+import contextlib
 import argparse
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn.functional as F
 
-# Ensure paper-3 directory is on Python path
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
@@ -24,10 +24,6 @@ from model import VynoraPaper3GNN
 
 
 def load_movie_metadata(data_dir):
-    """
-    Loads movie titles and full genre strings from movies.dat.
-    Format: MovieID::Title::Genres
-    """
     movies_path = os.path.join(data_dir, "movies.dat")
     meta = {}
     if os.path.exists(movies_path):
@@ -43,10 +39,7 @@ def load_movie_metadata(data_dir):
     return meta
 
 
-def compute_gini_simpson_diversity(genre_indices):
-    """
-    Computes Gini-Simpson diversity: D = 1 - sum(p_g^2)
-    """
+def compute_diversity(genre_indices):
     n = len(genre_indices)
     if n < 2:
         return 0.0
@@ -58,63 +51,51 @@ def compute_gini_simpson_diversity(genre_indices):
     return 1.0 - (same_pairs / total_pairs)
 
 
-def rank_movies_mmr(scores, cand_indices, cand_genres, topk=10, lambda_div=0.0):
-    """
-    Ranks candidate items using Maximal Marginal Relevance (MMR) for genre diversity.
-    lambda_div = 0.0: Pure relevance
-    lambda_div > 0.0: Trade-off between collaborative score and genre novelty
-    """
+def rank_mmr(scores, cand_indices, cand_genres, topk=10, lambda_div=0.0):
     if lambda_div <= 0.0:
         top_idx = np.argsort(-scores)[:topk]
         return [cand_indices[i] for i in top_idx], [scores[i] for i in top_idx]
 
-    # Normalize scores to [0, 1]
     s_min, s_max = np.min(scores), np.max(scores)
     norm_scores = (scores - s_min) / (s_max - s_min + 1e-8)
 
     selected = []
     selected_scores = []
     selected_genres = set()
-    rem_indices = list(range(len(cand_indices)))
+    rem = list(range(len(cand_indices)))
 
     for _ in range(min(topk, len(cand_indices))):
-        best_cand_idx = -1
-        best_mmr_val = -1e9
-
-        for idx in rem_indices:
-            g = cand_genres[idx]
-            # Novelty: 1.0 if novel genre, 0.0 if already present in selected list
+        best_idx = -1
+        best_val = -1e9
+        for i in rem:
+            g = cand_genres[i]
             novelty = 1.0 if g not in selected_genres else 0.0
-            mmr = (1.0 - lambda_div) * norm_scores[idx] + lambda_div * novelty
-            if mmr > best_mmr_val:
-                best_mmr_val = mmr
-                best_cand_idx = idx
+            val = (1.0 - lambda_div) * norm_scores[i] + lambda_div * novelty
+            if val > best_val:
+                best_val = val
+                best_idx = i
 
-        selected.append(cand_indices[best_cand_idx])
-        selected_scores.append(scores[best_cand_idx])
-        selected_genres.add(cand_genres[best_cand_idx])
-        rem_indices.remove(best_cand_idx)
+        selected.append(cand_indices[best_idx])
+        selected_scores.append(scores[best_idx])
+        selected_genres.add(cand_genres[best_idx])
+        rem.remove(best_idx)
 
     return selected, selected_scores
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MovieLens-1M Paper 3 Recommendation & Genre Diversity Predictor")
-    parser.add_argument("--user", "-u", type=int, default=42, help="Raw MovieLens User ID (1 to 6040, default: 42)")
-    parser.add_argument("--lambda_div", "-l", type=float, default=0.3, help="Genre diversity weight lambda in [0.0, 1.0] (default: 0.3)")
-    parser.add_argument("--topk", "-k", type=int, default=10, help="Number of movies to recommend (default: 10)")
-    parser.add_argument("--ckpt", type=str, default="", help="Optional explicit path to .pt checkpoint")
+    parser = argparse.ArgumentParser(description="MovieLens-1M Paper 3 Recommendation Predictor")
+    parser.add_argument("--user", "-u", type=int, default=42, help="MovieLens User ID (1-6040)")
+    parser.add_argument("--lambda_div", "-l", type=float, default=0.3, help="Genre diversity parameter [0.0 - 1.0]")
+    parser.add_argument("--topk", "-k", type=int, default=10, help="Number of items to recommend")
+    parser.add_argument("--ckpt", type=str, default="", help="Path to checkpoint")
     parser.add_argument("--data_dir", type=str, default="", help="Path to ml-1m directory")
+    parser.add_argument("--show-history", action="store_true", help="Show user's watch history sample")
     args = parser.parse_args()
 
-    print("=" * 80)
-    print("🎬 VYNORA PAPER 3 (MPGCL + DENOISING) - MOVIELENS-1M RECOMMENDATION ENGINE")
-    print("=" * 80)
-
-    # 1. Resolve Data Directory
+    # Resolve Data Directory
     data_dir = args.data_dir
     if not data_dir:
-        # Check standard relative paths
         candidates = [
             config.DATA_DIR,
             os.path.abspath(os.path.join(CURRENT_DIR, "..", "other-dataset's", "movielens", "ml-1m")),
@@ -127,34 +108,27 @@ def main():
                 break
 
     if not data_dir or not os.path.exists(os.path.join(data_dir, "ratings.dat")):
-        print(f"❌ Error: MovieLens-1M ratings.dat not found! Please provide --data_dir.")
+        print(f"Error: MovieLens dataset not found. Provide --data_dir.")
         sys.exit(1)
 
-    print(f"📁 Dataset Path: {data_dir}")
     movie_metadata = load_movie_metadata(data_dir)
 
-    # 2. Load Dataset Structure
-    print("⏳ Loading graph structures and user-movie mappings...")
-    dataset = MovieLensDataset(data_dir=data_dir)
-    print(f"✓ Loaded {dataset.n_users:,} users, {dataset.n_items:,} movies, {dataset.n_interactions:,} ratings.")
+    # Load dataset quietly
+    with contextlib.redirect_stdout(io.StringIO()):
+        dataset = MovieLensDataset(data_dir=data_dir)
 
-    # 3. Validate User ID
     raw_user_id = args.user
     if raw_user_id not in dataset.u_map:
-        print(f"⚠️ User ID {raw_user_id} not found in MovieLens. Defaulting to first available user.")
-        u_idx = 0
-        raw_user_id = dataset.inv_u_map[0]
-    else:
-        u_idx = dataset.u_map[raw_user_id]
+        print(f"Error: User ID #{raw_user_id} not found in MovieLens (valid range: 1 to {dataset.n_users}).")
+        sys.exit(1)
 
-    print(f"👤 Target User: MovieLens UserID #{raw_user_id} (Internal Index: {u_idx})")
+    u_idx = dataset.u_map[raw_user_id]
 
-    # 4. Initialize Model
-    device = config.DEVICE
-    model = VynoraPaper3GNN(dataset.n_users, dataset.n_items).to(device)
+    # Initialize model
+    model = VynoraPaper3GNN(dataset.n_users, dataset.n_items).to(config.DEVICE)
     model.set_graphs(dataset.graph_ui, dataset.meta_graph_u, dataset.meta_graph_i)
 
-    # 5. Load Checkpoint
+    # Load checkpoint quietly if exists
     ckpt_path = args.ckpt
     if not ckpt_path:
         ckpt_candidates = [
@@ -169,97 +143,85 @@ def main():
                 break
 
     if ckpt_path and os.path.exists(ckpt_path):
-        print(f"📦 Loading trained checkpoint: {ckpt_path}")
         try:
-            ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+            ckpt = torch.load(ckpt_path, map_location=config.DEVICE, weights_only=False)
             if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
                 model.load_state_dict(ckpt["model_state_dict"], strict=False)
-                print(f"✓ Resumed trained weights from Epoch {ckpt.get('epoch', 'N/A')} (Best NDCG: {ckpt.get('best_val_ndcg', 'N/A'):.4f})")
             elif isinstance(ckpt, dict):
                 model.load_state_dict(ckpt, strict=False)
-                print("✓ Loaded model state dictionary successfully.")
-        except Exception as e:
-            print(f"⚠️ Could not load checkpoint ({e}). Running with initialized embeddings.")
-    else:
-        print("💡 [Notice]: No local .pt checkpoint found in paper-3/checkpoints/.")
-        print("   -> Running inference using initialized Graph Neural Network embeddings.")
-        print("   -> To evaluate your 40-epoch trained model from Colab, place 'best_movielens_model.pt' into 'paper-3/checkpoints/'.")
+        except Exception:
+            pass
 
     model.eval()
 
-    # 6. Display User Watch History Sample
+    # User History (Optional)
     watched_items = dataset.train_pos_set[u_idx].union(dataset.val_pos_set[u_idx]).union(dataset.test_pos_set[u_idx])
-    watched_list = list(watched_items)
-    print("\n" + "-" * 80)
-    print(f"📜 USER #{raw_user_id} WATCH HISTORY SAMPLE (Total watched: {len(watched_items)} movies)")
-    print("-" * 80)
-    for sample_i in watched_list[:5]:
-        mid = dataset.inv_i_map[sample_i]
-        meta = movie_metadata.get(mid, {"title": f"Movie #{mid}", "genres": "Unknown"})
-        print(f"  ⭐ [{mid}] {meta['title']}  |  Genres: {meta['genres']}")
-    if len(watched_list) > 5:
-        print(f"  ... and {len(watched_list) - 5} more historical ratings.")
+    if args.show_history:
+        print(f"\nUser #{raw_user_id} History ({len(watched_items)} total watched):")
+        for sample_i in list(watched_items)[:5]:
+            mid = dataset.inv_i_map[sample_i]
+            meta = movie_metadata.get(mid, {"title": f"Movie #{mid}", "genres": "Unknown"})
+            print(f"  • {meta['title']} ({meta['genres']})")
 
-    # 7. Compute Predictions
+    # Compute Predictions
     with torch.no_grad():
         h_u, h_v = model.forward()
-        u_emb = h_u[u_idx] # (embed_dim,)
-        # Compute dot product across all items in catalog
-        all_scores = torch.mv(h_v, u_emb).cpu().numpy()
+        scores = torch.mv(h_v, h_u[u_idx]).cpu().numpy()
 
-    # Filter out already watched items
     cand_indices = [i for i in range(dataset.n_items) if i not in watched_items]
-    cand_scores = all_scores[cand_indices]
-    cand_primary_genres = [dataset.genre_list[i] for i in cand_indices]
+    cand_scores = scores[cand_indices]
+    cand_genres = [dataset.genre_list[i] for i in cand_indices]
 
-    # 8. Compute Recommendations: Pure Relevance (lambda = 0.0) vs. Diversified (lambda = chosen)
-    rec_pure, scores_pure = rank_movies_mmr(
-        cand_scores, cand_indices, cand_primary_genres, topk=args.topk, lambda_div=0.0
-    )
-    rec_div, scores_div = rank_movies_mmr(
-        cand_scores, cand_indices, cand_primary_genres, topk=args.topk, lambda_div=args.lambda_div
-    )
+    # Mode 1: Pure Accuracy Only (lambda == 0)
+    if args.lambda_div <= 0.0:
+        rec, _ = rank_mmr(cand_scores, cand_indices, cand_genres, topk=args.topk, lambda_div=0.0)
+        div = compute_diversity([dataset.genre_list[i] for i in rec])
+        u_genres = len(set(dataset.genre_list[i] for i in rec))
 
-    # Calculate diversity metrics
-    div_metric_pure = compute_gini_simpson_diversity([dataset.genre_list[i] for i in rec_pure])
-    div_metric_div = compute_gini_simpson_diversity([dataset.genre_list[i] for i in rec_div])
+        print(f"\nRecommendations for User #{raw_user_id} (λ = 0.0)")
+        print(f"{'#':<3} {'Title':<36} {'Genre':<22}")
+        print("-" * 64)
+        for rank, item_idx in enumerate(rec):
+            mid = dataset.inv_i_map[item_idx]
+            meta = movie_metadata.get(mid, {"title": f"Movie #{mid}", "genres": "N/A"})
+            title = (meta["title"][:33] + "..") if len(meta["title"]) > 35 else meta["title"]
+            genre = (meta["genres"][:20] + "..") if len(meta["genres"]) > 22 else meta["genres"]
+            print(f"{rank+1:02d}  {title:<36} {genre:<22}")
+        print("-" * 64)
+        print(f"Simpson Diversity: {div:.2f} ({u_genres} unique genres)\n")
+        return
 
-    unique_genres_pure = len(set(dataset.genre_list[i] for i in rec_pure))
-    unique_genres_div = len(set(dataset.genre_list[i] for i in rec_div))
+    # Mode 2: Comparative Display (Relevance vs. Diversified)
+    rec_pure, _ = rank_mmr(cand_scores, cand_indices, cand_genres, topk=args.topk, lambda_div=0.0)
+    rec_div, _ = rank_mmr(cand_scores, cand_indices, cand_genres, topk=args.topk, lambda_div=args.lambda_div)
 
-    # 9. Print Side-by-Side Comparison
-    print("\n" + "=" * 80)
-    print(f"🎯 TOP-{args.topk} RECOMMENDATIONS FOR USER #{raw_user_id}")
-    print("=" * 80)
-    print(f"Pure Relevance (λ = 0.0)             vs.    Diversified Recommendation (λ = {args.lambda_div})")
-    print(f"Genre Diversity (Simpson): {div_metric_pure:.4f}      |      Genre Diversity (Simpson): {div_metric_div:.4f}")
-    print(f"Unique Genres Covered:    {unique_genres_pure:<2d}          |      Unique Genres Covered:    {unique_genres_div:<2d}")
-    print("-" * 80)
+    div_pure = compute_diversity([dataset.genre_list[i] for i in rec_pure])
+    div_div = compute_diversity([dataset.genre_list[i] for i in rec_div])
+
+    u_genres_pure = len(set(dataset.genre_list[i] for i in rec_pure))
+    u_genres_div = len(set(dataset.genre_list[i] for i in rec_div))
+
+    print(f"\nRecommendations for User #{raw_user_id} (λ = {args.lambda_div})")
+    print(f"{'#':<3} {'Relevance (λ = 0.0)':<32} {'Genre':<16} |  {'Diversified (λ = ' + str(args.lambda_div) + ')':<32} {'Genre':<16}")
+    print("-" * 105)
 
     for rank in range(args.topk):
-        # Pure item
-        i_pure = rec_pure[rank]
-        mid_pure = dataset.inv_i_map[i_pure]
-        meta_pure = movie_metadata.get(mid_pure, {"title": f"Movie #{mid_pure}", "genres": "N/A"})
-        title_pure = (meta_pure["title"][:28] + "..") if len(meta_pure["title"]) > 30 else meta_pure["title"]
-        g_pure = meta_pure["genres"][:16]
+        # Pure
+        mid_p = dataset.inv_i_map[rec_pure[rank]]
+        meta_p = movie_metadata.get(mid_p, {"title": f"Movie #{mid_p}", "genres": "N/A"})
+        t_p = (meta_p["title"][:29] + "..") if len(meta_p["title"]) > 31 else meta_p["title"]
+        g_p = (meta_p["genres"][:14] + "..") if len(meta_p["genres"]) > 16 else meta_p["genres"]
 
-        # Diversified item
-        i_div = rec_div[rank]
-        mid_div = dataset.inv_i_map[i_div]
-        meta_div = movie_metadata.get(mid_div, {"title": f"Movie #{mid_div}", "genres": "N/A"})
-        title_div = (meta_div["title"][:28] + "..") if len(meta_div["title"]) > 30 else meta_div["title"]
-        g_div = meta_div["genres"][:16]
+        # Div
+        mid_d = dataset.inv_i_map[rec_div[rank]]
+        meta_d = movie_metadata.get(mid_d, {"title": f"Movie #{mid_d}", "genres": "N/A"})
+        t_d = (meta_d["title"][:29] + "..") if len(meta_d["title"]) > 31 else meta_d["title"]
+        g_d = (meta_d["genres"][:14] + "..") if len(meta_d["genres"]) > 16 else meta_d["genres"]
 
-        print(f"#{rank+1:02d} | {title_pure:<30} [{g_pure:<16}] | #{rank+1:02d} | {title_div:<30} [{g_div:<16}]")
+        print(f"{rank+1:02d}  {t_p:<32} {g_p:<16} |  {t_d:<32} {g_d:<16}")
 
-    print("-" * 80)
-    print(f"💡 Explanation:")
-    print(f"  • Under λ = 0.0 (Pure Accuracy), the model ranks strictly by predicted interaction affinity.")
-    print(f"  • Under λ = {args.lambda_div} (MMR Re-Ranking), the model balances collaborative relevance with genre")
-    print(f"    novelty, expanding the recommendation list from {unique_genres_pure} to {unique_genres_div} distinct genres.")
-    print(f"    This alleviates the 'filter bubble' / 'genre fatigue' problem without sacrificing relevance.")
-    print("=" * 80)
+    print("-" * 105)
+    print(f"     Diversity: {div_pure:.2f} ({u_genres_pure} genres)                |  Diversity: {div_div:.2f} ({u_genres_div} genres)\n")
 
 
 if __name__ == "__main__":
