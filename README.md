@@ -1,23 +1,32 @@
 # Vynora — Creator-Aware Micro-Video Recommendation & Fair Diversification
 
-Vynora is a high-performance PyTorch implementation of creator-aware micro-video recommendation. It models the bipartite graph of users, micro-videos, and creators (vloggers) with dual-view message passing, adaptive bilinear gating, and cross-view contrastive alignment, followed by fair re-ranking for publisher diversity.
+Vynora is a high-performance PyTorch implementation of creator-aware micro-video recommendation. It models the bipartite and tripartite graphs of users, micro-videos, and creators (vloggers) with dual-view message passing, adaptive gating, and cross-view contrastive alignment, followed by fair re-ranking for publisher diversity.
+
+As part of the **Unified Multi-View Formulation ([ADR 0001](docs/adr/0001-unified-multiview-architecture.md))**, Vynora operates seamlessly on both creator-dense micro-video feeds (WeChat Channels, TakaTak) and standard interaction graphs without creators (MovieLens-1M in `paper-3/`).
 
 ---
 
 ## Benchmark Results
 
-### 1. TakaTak Dataset
+### 1. TakaTak Dataset (14,571 Users, 13,133 Videos, 912 Creators)
 - **Relevance**: Recall@10: `0.0651` | NDCG@10: `0.0382` | Recall@20: `0.1009` | NDCG@20: `0.0471`
 - **Creator Diversification**: MMR (λ=0.3) maintains high relevance while providing balanced creator distribution.
 
-### 2. WeChat Dataset (Uncompromised Full-Epoch Training)
+### 2. WeChat Dataset (19,739 Users, 25,976 Videos, 2,088 Creators)
 - **Model Checkpoints**: `best_wechat_vynora_max.pt` (best validation weights) & `last_wechat_vynora_model.pt`
 - **Leave-One-Out Test Performance**:
   - Pure Relevance: Recall@10: `0.0034` | NDCG@10: `0.0023` | Pub Diversity: `0.0061`
   - **Hard Creator Cap (Max 2)**: **Recall@10: `0.0073` (+114.7%)** | NDCG@10: `0.0038` | **Pub Diversity: `0.9052` (+14,700%)**
+  - **Full Denoised Vynora**: **Recall@10: `0.0080` (+185.7% vs. LightGCN)** | NDCG@10: `0.0039` | **Pub Diversity: `0.9052`**
   - **MMR Publisher (λ=0.5)**: Recall@10: `0.0064` (+88.2%) | NDCG@10: `0.0037` | Pub Diversity: `0.5819`
 
 > **Key Finding**: In creator-dense micro-video feeds, unconstrained ranking causes severe creator starvation and cannibalization. Constraining recommendations to at most 2 videos per creator doubles Recall@10 and eliminates winner-take-all creator concentration.
+
+### 3. MovieLens-1M (Paper 3 / Zero-Vlogger Benchmark)
+See [`paper-3/README.md`](paper-3/README.md) for full benchmarks against MPGCL (ESWA 2023 Table 5) on 1,000,209 interactions at $d=200$.
+- **Vynora ($\lambda = 0.0$)**: **Precision@10: `0.5124`** | **Recall@10: `0.5186`** | **NDCG@10: `0.5742`** | **AUC: `0.9014`**
+- **MPGCL (Paper 3 SOTA)**: Precision@10: `0.4091` | Recall@10: `0.4636` | NDCG@10: `0.5038` | AUC: `0.8121`
+- **Improvement**: **+25.2% Precision**, **+11.9% Recall**, **+14.0% NDCG**, **+11.0% AUC**!
 
 ---
 
@@ -59,7 +68,7 @@ python ablation.py
 
 ## Directory Layout
 
-```
+```text
 data/                                Bundled TakaTak and WeChat interaction data
 research-papers/                     7 consolidated and standardized research papers
 results/                             Standardized trained models, notebooks, and JSON benchmarks
@@ -74,7 +83,7 @@ config.py                            Hyperparameter configuration
 dataloader.py                        Data loading, graph construction, leave-one-out splits
 model.py                             Creator-aware dual-view GNN with bilinear gating
 sampler.py                           BPR uniform negative sampling
-denoiser.py                          Graph-edge soft filtering
+denoiser.py                          Periodic quantile graph denoiser with EMA (ADR 0002)
 evaluate.py                          Ranking (Recall, NDCG, MRR) and diversity metrics
 diversity.py                         MMR and creator diversification re-ranking
 ablation.py                          6-variant research ablation runner
@@ -82,13 +91,6 @@ ablation.py                          6-variant research ablation runner
 
 ---
 
-## Data Format
-
-Each dataset directory (`data/takatak/` and `data/wechat/`) contains:
-- `data_size.txt`: Entity counts (users, videos, creators)
-- `user_video_data.txt`: User-to-video implicit interactions
-- `user_vlogger_data.txt`: Primary user-to-creator interactions
-- `user_vlogger_data2.txt`: Auxiliary user-to-creator interactions
-- `vlogger_video_data.txt`: Creator-to-video publishing associations
-
-Evaluation follows strict leave-one-out protocol: user's final interaction is held out for test, the preceding one is for validation, and earlier interactions form the training graph.
+## Architecture Decisions & Domain Glossary
+- Domain Definitions: [`GLOSSARY.md`](GLOSSARY.md)
+- Architecture Decision Records: [`docs/adr/`](docs/adr/)

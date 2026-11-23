@@ -1,0 +1,17 @@
+# Baseline Performance from Paper 3 (MPGCL) - Table 5 (80:10:10 Split, K=10)
+
+This table shows the exact published results from Paper 3 on MovieLens-1M. Our objective is to evaluate our denoised framework on the same dataset and split to compare directly against these numbers.
+
+| Model | Architecture Type | Precision@10 | Recall@10 | NDCG@10 | AUC | Publication / Reference |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **DeepFM** | Feature Factorization | 0.2323 | 0.3008 | 0.3991 | 0.6883 | Guo et al., IJCAI 2017 |
+| **GraphSAGE** | Inductive Homogeneous GNN | 0.3172 | 0.3491 | 0.4100 | 0.7290 | Hamilton et al., NeurIPS 2017 |
+| **MMGCN** | Multimodal GCN | 0.3555 | 0.3889 | 0.4319 | 0.7383 | Wei et al., MM 2019 |
+| **LightGCN** | Simplified Linear GCN | 0.3693 | 0.4198 | 0.4474 | 0.7499 | He et al., SIGIR 2020 |
+| **UltraGCN** | Infinite Layer Constraint GCN | 0.3782 | 0.4239 | 0.4599 | 0.7681 | Mao et al., CIKM 2021 |
+| **HAN** | Heterogeneous Graph Attention | 0.3774 | 0.4295 | 0.4691 | 0.7661 | Wang et al., WWW 2019 |
+| **HetGNN** | Heterogeneous Graph Network | 0.3812 | 0.4294 | 0.4784 | 0.7682 | Zhang et al., KDD 2019 |
+| **GCL** | Graph Contrastive Learning | 0.3448 | 0.3994 | 0.4223 | 0.7094 | You et al., NeurIPS 2020 |
+| **HHFAN** | Heterogeneous Feature Attn | 0.3803 | 0.4405 | 0.4813 | 0.7790 | ESWA Baseline |
+| **MPGCL** | Meta-Path Contrastive GCL | **0.4091** | **0.4636** | **0.5038** | **0.8121** | He et al., ESWA 2023 (Paper 3 SOTA) |
+| **Vynora (Ours)** | Denoised Self-Contrast GNN | *Pending* | *Pending* | *Pending* | *Pending* | **Proposed (BTP / Paper)** |
